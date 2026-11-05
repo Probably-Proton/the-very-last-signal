@@ -224,7 +224,8 @@ export function ClearanceTerminalView({
       tacticalAudio.playSuccess();
       const nowIso = new Date().toISOString();
       const scoreBreakdown = calculateStageScore(2, nowIso);
-      const awardedPoints = result.pointsEarned ?? scoreBreakdown.totalScore;
+      const isAlreadySolved = result.status === 'already_solved';
+      const awardedPoints = isAlreadySolved ? 0 : (result.pointsEarned ?? scoreBreakdown.totalScore);
 
       const nextCompleted = Math.max(progress.stagesCompleted, 2);
       const isNextAccessible = isStageAccessible(3, nextCompleted, new Date(), Boolean(progress.hasStageOverride));
@@ -234,10 +235,14 @@ export function ClearanceTerminalView({
         '[DECRYPTION VERIFIED] // COORDINATE PARITY CONFIRMED',
         '> TELEMETRY MATCHES ARCHIVAL RECORDS',
         '-------------------------------------------------------',
-        isNextAccessible
+        isAlreadySolved
+          ? '[RECORD ON FILE] STAGE 02 CLEARANCE PREVIOUSLY RECORDED'
+          : isNextAccessible
           ? '[CLEARANCE GRANTED] STAGE 02 CLEARED // STAGE 03 UNLOCKED'
           : '[CLEARANCE GRANTED] STAGE 02 CLEARED // STAGE 03 TIMELOCKED',
-        `> AWARDED: +${awardedPoints} MERIT POINTS`,
+        isAlreadySolved
+          ? '> PREVIOUSLY RECORDED: 0 ADDITIONAL MERIT POINTS AWARDED'
+          : `> AWARDED: +${awardedPoints} MERIT POINTS`,
         isNextAccessible
           ? '> NEW EVIDENCE UNLOCKED: Case Sector 03 Witness Records'
           : '> Case Sector 03 docket files unlock on scheduled release timetable.',
@@ -252,9 +257,11 @@ export function ClearanceTerminalView({
             ? Array.from(new Set([...prev.unlockedEvidenceIds, 'CAS-017', 'EV-0301']))
             : prev.unlockedEvidenceIds;
 
+          const existingStage2Score = prev.stageScores[2];
+          const nextStage2Score = existingStage2Score !== undefined ? existingStage2Score : awardedPoints;
           const nextScores = {
             ...prev.stageScores,
-            2: awardedPoints,
+            2: nextStage2Score,
           };
           const totalScore = Object.values(nextScores).reduce((a, b) => a + b, 0);
 
@@ -268,22 +275,25 @@ export function ClearanceTerminalView({
             stageScores: nextScores,
             stageSolveTimestamps: {
               ...prev.stageSolveTimestamps,
-              2: nowIso,
+              2: prev.stageSolveTimestamps[2] || nowIso,
             },
             stageScoringEligible: {
               ...prev.stageScoringEligible,
-              2: scoreBreakdown.scoringEligible,
+              2: prev.stageScoringEligible[2] ?? scoreBreakdown.scoringEligible,
             },
             score: totalScore,
-            tasksCompleted: prev.tasksCompleted + 1,
+            tasksCompleted: prev.stage2DeductionSolved ? prev.tasksCompleted : prev.tasksCompleted + 1,
           };
         });
       }
     } else {
       tacticalAudio.playError();
+      const isUnavailable = result.status === 'unavailable';
       setTerminalLogs((prev) => [
         ...prev,
-        '[DECRYPTION REJECTED] // 403 INVALID COORDINATE STREAM',
+        isUnavailable
+          ? '[ACCESS DENIED] // 403 TIMELOCKED'
+          : '[DECRYPTION REJECTED] // 403 INVALID COORDINATE STREAM',
         result.message || 'STATUS: INCORRECT. Coordinate verification failed.',
       ]);
     }

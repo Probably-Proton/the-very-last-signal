@@ -1776,17 +1776,17 @@ function LoginView({ onLoggedIn }: { onLoggedIn: (user: PrototypeUser) => void }
 
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>Call-Sign / Username or Email</label>
+              <label>Username or Gmail</label>
               <input
                 type="text"
-                placeholder="e.g. Cipher_Echo or operative@school.edu"
+                placeholder="e.g. Cipher_Echo or operative@gmail.com"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 required
                 autoComplete="username"
               />
               <span className="text-[10px] font-mono text-muted-foreground mt-1 block">
-                Sign in with either your unique operative call-sign or your student email.
+                Sign in with either your unique operative username/call-sign or your registered Gmail.
               </span>
             </div>
 
@@ -5803,6 +5803,11 @@ function TeamView({
 
   useEffect(() => {
     loadTeamData();
+    // Auto-poll team roster updates every 10 seconds for real-time recruit synchronization
+    const timer = setInterval(() => {
+      loadTeamData();
+    }, 10000);
+    return () => clearInterval(timer);
   }, [user.callSign]);
 
   // Handle creating a new team

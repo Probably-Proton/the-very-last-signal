@@ -110,14 +110,29 @@ export async function submitChallengeAnswer(params: {
 
   // 1. Authoritative Application Server Verification
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: sessData } = await supabase.auth.getSession();
+        if (sessData?.session?.access_token) {
+          headers['Authorization'] = `Bearer ${sessData.session.access_token}`;
+        }
+      } catch {}
+    }
+
     const res = await fetch('/api/challenges/submit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         callSign,
         challengeKey,
         answer,
         username,
+        stagesCompleted: currentProgress?.stagesCompleted ?? 0,
+        currentProgress: {
+          stagesCompleted: currentProgress?.stagesCompleted ?? 0,
+          hasStageOverride: Boolean(currentProgress?.hasStageOverride),
+        },
       }),
     });
 
@@ -137,8 +152,8 @@ export async function submitChallengeAnswer(params: {
       if (errJson) {
         return {
           success: false,
-          status: errJson.status || 'incorrect',
-          message: errJson.error || errJson.message || 'Decryption verification failed.',
+          status: errJson.status || (res.status === 403 ? 'unavailable' : 'incorrect'),
+          message: errJson.message || errJson.error || 'Decryption verification failed.',
           attemptsLeft: errJson.attemptsLeft,
           mode: 'live_supabase',
         };

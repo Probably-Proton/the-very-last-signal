@@ -142,11 +142,7 @@ function isValidPrototypeUser(obj: unknown): obj is PrototypeUser {
   const candidate = obj as Record<string, unknown>;
   return (
     typeof candidate.id === 'string' && candidate.id.trim().length > 0 &&
-    typeof candidate.callSign === 'string' && candidate.callSign.trim().length > 0 &&
-    typeof candidate.fullName === 'string' && candidate.fullName.trim().length > 0 &&
-    typeof candidate.studentClass === 'string' && candidate.studentClass.trim().length > 0 &&
-    typeof candidate.admissionNumberMasked === 'string' && candidate.admissionNumberMasked.trim().length > 0 &&
-    typeof candidate.registeredAt === 'string' && candidate.registeredAt.trim().length > 0
+    typeof candidate.callSign === 'string' && candidate.callSign.trim().length > 0
   );
 }
 
@@ -163,15 +159,15 @@ export function getActiveUser(): PrototypeUser | null {
     if (isValidPrototypeUser(session)) {
       return {
         id: session.id,
-        fullName: session.fullName,
+        fullName: typeof session.fullName === 'string' && session.fullName.trim() ? session.fullName : session.callSign,
         email: typeof session.email === 'string' ? session.email : undefined,
-        school: typeof session.school === 'string' ? session.school : undefined,
-        studentClass: session.studentClass,
-        admissionNumberMasked: session.admissionNumberMasked,
+        school: typeof session.school === 'string' ? session.school : 'School Division',
+        studentClass: typeof session.studentClass === 'string' && session.studentClass.trim() ? session.studentClass : 'Class 9',
+        admissionNumberMasked: typeof session.admissionNumberMasked === 'string' && session.admissionNumberMasked.trim() ? session.admissionNumberMasked : 'ADM-••••0000',
         admissionHash: typeof session.admissionHash === 'string' ? session.admissionHash : '',
         callSign: session.callSign,
         passwordHash: typeof session.passwordHash === 'string' ? session.passwordHash : '',
-        registeredAt: session.registeredAt,
+        registeredAt: typeof session.registeredAt === 'string' && session.registeredAt.trim() ? session.registeredAt : new Date().toISOString(),
         role: session.role,
         isStaff: Boolean(session.isStaff),
         hasStageOverride: Boolean(session.hasStageOverride),

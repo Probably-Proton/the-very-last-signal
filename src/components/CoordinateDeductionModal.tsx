@@ -77,7 +77,8 @@ export function CoordinateDeductionModal({
       tacticalAudio.playSuccess();
       const nowIso = new Date().toISOString();
       const scoreBreakdown = calculateStageScore(2, nowIso);
-      const awardedPoints = result.pointsEarned ?? scoreBreakdown.totalScore;
+      const isAlreadySolved = result.status === 'already_solved';
+      const awardedPoints = isAlreadySolved ? 0 : (result.pointsEarned ?? scoreBreakdown.totalScore);
 
       const nextCompleted = Math.max(progress.stagesCompleted, 2);
       const isNextAccessible = isStageAccessible(3, nextCompleted, new Date(), Boolean(progress.hasStageOverride));
@@ -90,18 +91,20 @@ export function CoordinateDeductionModal({
         '> CADASTRAL SURVEY RESOLVED: RESIDENTIAL PARCEL IDENTIFIED',
         '> ACCESS GRANTED TO CASE DOSSIER CAS-017',
         '-------------------------------------------------------',
-        isNextAccessible
+        isAlreadySolved
+          ? '[STAGE 02 CLEARANCE PREVIOUSLY RECORDED] 0 additional merit points awarded'
+          : isNextAccessible
           ? '[STAGE 02 CLEARED] MERIT AWARDED: +' + awardedPoints + ' PTS // STAGE 03 UNLOCKED'
           : '[STAGE 02 CLEARED] MERIT AWARDED: +' + awardedPoints + ' PTS // STAGE 03 TIMELOCKED',
-        scoreBreakdown.scoringEligible
+        !isAlreadySolved && (scoreBreakdown.scoringEligible
           ? `(100 Base + ${scoreBreakdown.hourlyBonus} Hourly Speed Bonus)`
-          : '(Late solve: 0 competitive points awarded)',
+          : '(Late solve: 0 competitive points awarded)'),
         '> NEW DOSSIER DECLASSIFIED: CAS-017 (Verbatim Stenographic Witness Transcript)',
         '> NEW DOSSIER DECLASSIFIED: EV-0301 (Coastal Transmission Mast)',
         isNextAccessible
           ? '> INVESTIGATOR DIRECTIVE: Cross-reference witness transcript CAS-017 on the Signal Map in Stage 03.'
           : '> INVESTIGATOR DIRECTIVE: Witness transcript CAS-017 secured. Stage 03 map unlocks on scheduled release timetable.',
-      ]);
+      ].filter(Boolean) as string[]);
 
       if (onUpdateProgress) {
         onUpdateProgress((prev) => {
@@ -109,9 +112,12 @@ export function CoordinateDeductionModal({
           const nextUnlocked = isNextAccessible
             ? Array.from(new Set([...prev.unlockedEvidenceIds, 'CAS-017', 'EV-0301']))
             : prev.unlockedEvidenceIds;
+
+          const existingStage2Score = prev.stageScores[2];
+          const nextStage2Score = existingStage2Score !== undefined ? existingStage2Score : awardedPoints;
           const nextScores = {
             ...prev.stageScores,
-            2: awardedPoints,
+            2: nextStage2Score,
           };
           const totalScore = Object.values(nextScores).reduce((a, b) => a + b, 0);
 
@@ -124,23 +130,26 @@ export function CoordinateDeductionModal({
             stageScores: nextScores,
             stageSolveTimestamps: {
               ...prev.stageSolveTimestamps,
-              2: nowIso,
+              2: prev.stageSolveTimestamps[2] || nowIso,
             },
             stageScoringEligible: {
               ...prev.stageScoringEligible,
-              2: scoreBreakdown.scoringEligible,
+              2: prev.stageScoringEligible[2] ?? scoreBreakdown.scoringEligible,
             },
             score: totalScore,
-            tasksCompleted: prev.tasksCompleted + 1,
+            tasksCompleted: prev.stage2DeductionSolved ? prev.tasksCompleted : prev.tasksCompleted + 1,
             status: 'IN PROGRESS',
           };
         });
       }
     } else {
       tacticalAudio.playError();
+      const isUnavailable = result.status === 'unavailable';
       setTerminalOutput((prev) => [
         ...prev,
-        '[VALIDATION FAILED] // 422 UNRESOLVED GEOGRAPHIC TARGET',
+        isUnavailable
+          ? '[ACCESS DENIED] // 403 TIMELOCKED'
+          : '[VALIDATION FAILED] // 422 UNRESOLVED GEOGRAPHIC TARGET',
         result.message || 'ERROR: Decrypted string does not match archival camera telemetry.',
         'Review the photographic negative plates and marginal markings in the case files.',
       ]);

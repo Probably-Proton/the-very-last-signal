@@ -366,45 +366,70 @@ export async function loginUser(
         }
         authUser = data.user;
       } else {
-        // Username-based login via secure server proxy that resolves username to auth identity
-        const res = await fetch('/api/auth/username-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: normalizedInput,
-            password: passwordPlain,
-          }),
-        });
+        // Check if there is a cached callsign -> email mapping on this device
+        let cachedEmail: string | null = null;
+        try {
+          cachedEmail = localStorage.getItem('tls_callsign_email_' + normalizedInput.toLowerCase());
+        } catch {}
 
-        const json = await res.json();
-        if (!res.ok || !json.success || !json.session) {
-          // Check local prototype fallback if server username lookup failed
-          const localCheck = await loginPrototypeUser(normalizedInput, passwordPlain);
-          if (localCheck.success && localCheck.user) {
-            return {
-              ...localCheck,
-              mode: 'prototype_local',
-            };
+        if (cachedEmail) {
+          const { data: cachedAuthData, error: cachedAuthError } = await supabase.auth.signInWithPassword({
+            email: cachedEmail.toLowerCase(),
+            password: passwordPlain,
+          });
+          if (!cachedAuthError && cachedAuthData?.user) {
+            authUser = cachedAuthData.user;
+          }
+        }
+
+        if (!authUser) {
+          // Username-based login via secure server proxy that resolves username to auth identity
+          let json: any = null;
+          try {
+            const res = await fetch('/api/auth/username-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                username: normalizedInput,
+                password: passwordPlain,
+              }),
+            });
+            json = await res.json().catch(() => null);
+
+            if (res.ok && json?.success && json?.session) {
+              // Establish the real Supabase Auth session in the browser client
+              const { error: sessionError } = await supabase.auth.setSession({
+                access_token: json.session.access_token,
+                refresh_token: json.session.refresh_token,
+              });
+
+              if (sessionError) {
+                console.warn('[authService] Failed setting Supabase session from username login:', sessionError);
+              }
+
+              authUser = json.user;
+            }
+          } catch (netErr) {
+            console.warn('[authService] Username-login proxy network error:', netErr);
           }
 
-          return {
-            success: false,
-            error: json.error || 'Invalid case credentials. Please check your call-sign and password.',
-            mode: 'live_supabase',
-          };
+          if (!authUser) {
+            // Check local prototype fallback if server username lookup failed
+            const localCheck = await loginPrototypeUser(normalizedInput, passwordPlain);
+            if (localCheck.success && localCheck.user) {
+              return {
+                ...localCheck,
+                mode: 'prototype_local',
+              };
+            }
+
+            return {
+              success: false,
+              error: json?.error || 'Invalid case credentials. Please check your call-sign and password.',
+              mode: 'live_supabase',
+            };
+          }
         }
-
-        // Establish the real Supabase Auth session in the browser client
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: json.session.access_token,
-          refresh_token: json.session.refresh_token,
-        });
-
-        if (sessionError) {
-          console.warn('[authService] Failed setting Supabase session from username login:', sessionError);
-        }
-
-        authUser = json.user;
       }
 
       if (!authUser) {
@@ -648,6 +673,18 @@ async function syncUserDatabaseState(userId: string, _callSign: string, nextProg
         if (maxStage > nextProg.stagesCompleted) {
           nextProg.stagesCompleted = maxStage;
           nextProg.activeStage = Math.max(nextProg.activeStage, Math.min(7, maxStage + 1));
+        }
+        if (maxStage >= 2) {
+          nextProg.stage2DeductionSolved = true;
+          if (!nextProg.unlockedEvidenceIds.includes('CAS-017')) {
+            nextProg.unlockedEvidenceIds.push('CAS-017');
+          }
+          if (!nextProg.unlockedEvidenceIds.includes('EV-0301')) {
+            nextProg.unlockedEvidenceIds.push('EV-0301');
+          }
+          if (!nextProg.solvedChallengeKeys.includes('stage2_coords')) {
+            nextProg.solvedChallengeKeys.push('stage2_coords');
+          }
         }
         if (totalDbScore > nextProg.score) {
           nextProg.score = totalDbScore;

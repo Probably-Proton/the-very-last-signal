@@ -335,36 +335,69 @@ app.post('/api/auth/username-login', async (req, res) => {
   }
 
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
-  if (supabaseAdmin && supabaseUrl && anonKey) {
+  if (supabaseUrl && anonKey) {
     try {
-      // 1. Case-insensitive lookup in public.profiles
-      const { data: profile, error: pErr } = await supabaseAdmin
-        .from('profiles')
-        .select('id, username, full_name, student_class, admission_masked')
-        .ilike('username', cleanUsername)
-        .maybeSingle();
+      const client = supabaseAdmin || createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });
+      let userEmail: string | null = null;
+      let profile: any = null;
 
-      if (pErr || !profile) {
+      // 1. If cleanUsername is already an email format
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanUsername)) {
+        userEmail = cleanUsername.toLowerCase();
+      }
+
+      // 2. Try database RPC lookup if deployed
+      if (!userEmail) {
+        try {
+          const { data: rpcEmail } = await client.rpc('lookup_auth_email_by_username', { p_username: cleanUsername });
+          if (rpcEmail && typeof rpcEmail === 'string' && rpcEmail.includes('@')) {
+            userEmail = rpcEmail.toLowerCase().trim();
+          }
+        } catch {}
+      }
+
+      // 3. Case-insensitive lookup in public.profiles by username or email
+      if (!userEmail) {
+        let { data: prof } = await client
+          .from('profiles')
+          .select('id, username, email, full_name, student_class, admission_masked')
+          .ilike('username', cleanUsername)
+          .maybeSingle();
+
+        if (!prof) {
+          const { data: profByEmail } = await client
+            .from('profiles')
+            .select('id, username, email, full_name, student_class, admission_masked')
+            .ilike('email', cleanUsername)
+            .maybeSingle();
+          prof = profByEmail;
+        }
+
+        if (prof) {
+          profile = prof;
+          if (prof.email && prof.email.includes('@')) {
+            userEmail = prof.email.toLowerCase().trim();
+          } else if (supabaseAdmin) {
+            try {
+              const { data: userRecord } = await supabaseAdmin.auth.admin.getUserById(prof.id);
+              if (userRecord?.user?.email) {
+                userEmail = userRecord.user.email.toLowerCase().trim();
+              }
+            } catch {}
+          }
+        }
+      }
+
+      // 4. If email could not be resolved, return uniform credential error (no enumeration)
+      if (!userEmail) {
         res.status(401).json({
           success: false,
-          error: `No registered case file found matching call-sign "${cleanUsername}". Verify your username or register a new file.`,
+          error: 'Invalid case credentials. Please verify your username and password.',
         });
         return;
       }
 
-      // 2. Fetch auth user by profile id to get email without client-side leakage
-      const { data: userRecord, error: uErr } = await supabaseAdmin.auth.admin.getUserById(profile.id);
-      if (uErr || !userRecord?.user?.email) {
-        res.status(401).json({
-          success: false,
-          error: 'Authentication directory record could not be resolved for this call-sign.',
-        });
-        return;
-      }
-
-      const userEmail = userRecord.user.email;
-
-      // 3. Authenticate with Supabase Auth using the resolved email and provided password
+      // 5. Authenticate with Supabase Auth using the resolved email and provided password
       const authClient = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });
       const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
         email: userEmail,
@@ -374,9 +407,19 @@ app.post('/api/auth/username-login', async (req, res) => {
       if (authError || !authData.session) {
         res.status(401).json({
           success: false,
-          error: authError?.message || 'Invalid case credentials. Please verify your call-sign and password.',
+          error: 'Invalid case credentials. Please verify your username and password.',
         });
         return;
+      }
+
+      // 6. Fetch profile if not already fetched
+      if (!profile) {
+        const { data: fetchedProf } = await client
+          .from('profiles')
+          .select('id, username, email, full_name, student_class, admission_masked')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+        profile = fetchedProf;
       }
 
       // Return real Supabase session so browser can set it via supabase.auth.setSession()
@@ -384,16 +427,17 @@ app.post('/api/auth/username-login', async (req, res) => {
         success: true,
         session: authData.session,
         user: authData.user,
-        profile,
+        profile: profile || { id: authData.user.id, username: cleanUsername },
       });
       return;
     } catch (err: any) {
       console.error('[server] Error in username-login:', err);
-      res.status(500).json({ success: false, error: err?.message || 'Internal authentication server error.' });
+      res.status(500).json({ success: false, error: 'Internal authentication server error.' });
       return;
     }
   }
 
+  // Fallback if live Supabase is unconfigured (prototype mode)
   res.status(503).json({
     success: false,
     error: 'Live authentication service unavailable. Check Supabase connection.',
@@ -436,87 +480,91 @@ app.post('/api/challenges/submit', async (req, res) => {
   const scores = loadPlayerScores();
   const userScoreRecord = scores[cleanCall];
   const userOverride = overrides[cleanCall];
-  const hasOverride = Boolean(
+
+  let dbStagesCompleted = 0;
+  let dbHasOverride = false;
+  let dbAlreadySolved = false;
+
+  // If Supabase Admin is available, check authoritative participant record
+  if (supabaseAdmin && cleanCall) {
+    try {
+      const { data: prof } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .ilike('username', cleanCall)
+        .maybeSingle();
+
+      if (prof) {
+        const { data: memberRows } = await supabaseAdmin
+          .from('participant_members')
+          .select('participant_id')
+          .eq('user_id', prof.id)
+          .is('left_at', null)
+          .limit(1);
+
+        const pid = memberRows?.[0]?.participant_id;
+        if (pid) {
+          const { data: compRows } = await supabaseAdmin
+            .from('stage_completions')
+            .select('stage_id')
+            .eq('participant_id', pid);
+
+          if (Array.isArray(compRows)) {
+            dbStagesCompleted = compRows.reduce((max: number, r: any) => Math.max(max, Number(r.stage_id) || 0), 0);
+            dbAlreadySolved = compRows.some((r: any) => Number(r.stage_id) === stageNumber);
+          }
+
+          const { data: ovRow } = await supabaseAdmin
+            .from('participant_stage_overrides')
+            .select('enabled')
+            .eq('participant_id', pid)
+            .maybeSingle();
+
+          if (ovRow?.enabled) {
+            dbHasOverride = true;
+          }
+        }
+      }
+    } catch (sbCheckErr) {
+      console.warn('[server] Supabase profile check notice:', sbCheckErr);
+    }
+  }
+
+  const effectiveHasOverride = Boolean(
+    dbHasOverride ||
     userScoreRecord?.hasStageOverride ||
     userOverride?.hasStageOverride ||
-    (userOverride?.stages && userOverride.stages[stageNumber])
+    (userOverride?.stages && userOverride.stages[stageNumber]) ||
+    req.body.currentProgress?.hasStageOverride
   );
 
-  const stagesCompleted = Math.max(
+  const effectiveStagesCompleted = Math.max(
+    dbStagesCompleted,
     userScoreRecord?.stagesCompleted ?? 0,
     Number(req.body.stagesCompleted || req.body.currentProgress?.stagesCompleted || 0)
   );
 
   // DUAL RELEASE REQUIREMENT: PREVIOUS_STAGE_COMPLETED AND CURRENT_TIME >= RELEASE_TIMESTAMP
-  if (!hasOverride && stageConfig) {
-    const isPrereqCompleted = stageNumber === 1 || stagesCompleted >= stageConfig.prereqStages;
+  if (!effectiveHasOverride && stageConfig) {
+    const isPrereqCompleted = stageNumber === 1 || effectiveStagesCompleted >= stageConfig.prereqStages;
     const isReleaseTimeReached = Date.now() >= new Date(stageConfig.openIso).getTime();
 
     if (!isPrereqCompleted || !isReleaseTimeReached) {
       res.status(403).json({
         success: false,
         status: 'unavailable',
-        message: 'RECORD LOCKED: Case file is sealed under stage release timetable.',
+        message: !isPrereqCompleted
+          ? 'PREREQUISITE LOCKED: Immediately preceding case sector must be cleared first.'
+          : 'TIMELOCKED: Case file is sealed under stage release timetable.',
       });
       return;
     }
   }
 
-  // 1. Try Supabase RPC if configured
-  if (supabaseAdmin) {
-    try {
-      const { data, error } = await supabaseAdmin.rpc('submit_challenge', {
-        p_key: challengeKey,
-        p_answer: answer,
-        p_username: username || null,
-      });
+  // Check if stage is already cleared by this operative
+  const alreadyCleared = dbAlreadySolved || (userScoreRecord && userScoreRecord.stagesCompleted >= stageNumber);
 
-      if (!error && data) {
-        if (data.status === 'correct') {
-          res.json({
-            success: true,
-            status: 'correct',
-            message: 'CLEARANCE GRANTED: Cryptographic key match confirmed.',
-            pointsEarned: data.points || 100,
-          });
-          return;
-        } else if (data.status === 'incorrect') {
-          res.status(400).json({
-            success: false,
-            status: 'incorrect',
-            message: 'ACCESS DENIED: Decryption verification failed.',
-            attemptsLeft: data.attempts_left,
-          });
-          return;
-        } else if (data.status === 'already_solved') {
-          res.json({
-            success: true,
-            status: 'already_solved',
-            message: 'RECORD ON FILE: Clearance was previously unlocked for this case file.',
-          });
-          return;
-        } else if (data.status === 'unavailable') {
-          res.status(403).json({
-            success: false,
-            status: 'unavailable',
-            message: 'RECORD LOCKED: Case file is sealed under stage release timetable.',
-          });
-          return;
-        } else if (data.status === 'attempts_exhausted' || data.status === 'rate_limited') {
-          res.status(429).json({
-            success: false,
-            status: data.status,
-            message: data.status === 'rate_limited' ? 'RATE LIMITED: Too many submissions. Wait before retrying.' : 'ATTEMPTS EXHAUSTED: Clearance verification locked for this sector.',
-          });
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('[server] Supabase challenge validation fallback:', err);
-    }
-  }
-
-  // 2. Authoritative Server-Side Canonical Validation (Fallback)
+  // 1. Authoritative Canonical Validation
   const norm = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
   let isCorrect = false;
@@ -525,30 +573,37 @@ app.post('/api/challenges/submit', async (req, res) => {
   if (challengeKey === 'gate_zk_login') {
     const cleanUser = norm(username || '');
     const cleanAns = norm(answer || '');
-    const validUsers = ['zkcase', 'zkcase17', 'zk', 'zcase', 'case', 'archivalb', 'zkcase17orion'];
+    const validUsers = ['zkcase', 'zkcase17', 'zk', 'zcase', 'archivalb'];
     const validAnswers = ['case17', '17'];
 
-    // STRICT VALIDATION: Require matching directory acrostic and password telestich.
-    // Explicitly reject any arbitrary six-letter words or format mismatches.
-    if (
-      (validUsers.includes(cleanUser) && validAnswers.includes(cleanAns)) ||
-      (cleanUser === '' && cleanAns === 'case17') ||
-      cleanAns === 'case17' ||
-      (cleanUser === 'zkcase17' && cleanAns === 'orion')
-    ) {
+    // STRICT INDEPENDENT VERIFICATION:
+    // Stage 1 has separate ZKCase (acrostic) and password (telestich) requirements.
+    // 1. ZKCase directory requirement: must match the acrostic from the document margins.
+    const isZkUserValid = validUsers.includes(cleanUser) || (cleanUser === 'zkcase17' && cleanAns === 'orion');
+    // 2. Password clearance key requirement: must match the telestich key.
+    const isPasswordValid = validAnswers.includes(cleanAns) || (cleanUser === 'zkcase17' && cleanAns === 'orion');
+
+    // Both requirements must be satisfied independently.
+    // The password 'case17' must NOT automatically satisfy the separate ZKCase requirement.
+    // Neither requirement can be empty or bypass the other.
+    if (cleanUser.length > 0 && cleanAns.length > 0 && isZkUserValid && isPasswordValid) {
       isCorrect = true;
       unlockedEvidence = ['EV-0102', 'EV-0103', 'EV-0201', 'EV-0202', 'EV-0203', 'EV-0204'];
     }
   } else if (challengeKey === 'stage2_coords') {
-    const raw = String(answer || '').toLowerCase();
-    const clean = raw.replace(/[()\[\]°\s]/g, '');
-    const cleanNoSigns = clean.replace(/[^0-9a-z.,-]/g, '');
-    if (
-      (cleanNoSigns.includes('37.78874') && (cleanNoSigns.includes('122.45709') || cleanNoSigns.includes('-122.45709'))) ||
-      cleanNoSigns === '3893' ||
-      cleanNoSigns.includes('house3893') ||
-      cleanNoSigns.includes('3893')
-    ) {
+    const raw = String(answer || '').trim().toLowerCase();
+    // Support cadastral house number or geographic coordinates
+    const cleanHouse = raw.replace(/[^a-z0-9]/g, '');
+    const isHouseNumber = cleanHouse === '3893' || cleanHouse === 'house3893';
+
+    // Geographic decimal coordinates: latitude ~37.78874, longitude ~122.45709
+    // Handles format variations: "37.78874, -122.45709", "(37.78874, -122.45709)",
+    // "37.78874° N, 122.45709° W", "37.78874, 122.45709", "37.78874 -122.45709"
+    const cleanCoords = raw.replace(/[()\[\]°\s]/g, '');
+    const hasLat = cleanCoords.includes('37.78874');
+    const hasLon = cleanCoords.includes('122.45709');
+
+    if (isHouseNumber || (hasLat && hasLon)) {
       isCorrect = true;
       unlockedEvidence = ['CAS-017', 'EV-0301'];
     }
@@ -572,15 +627,76 @@ app.post('/api/challenges/submit', async (req, res) => {
     }
   }
 
+  // If input fails canonical validation, reject immediately
+  if (!isCorrect) {
+    res.status(400).json({
+      success: false,
+      status: 'incorrect',
+      message: 'ACCESS DENIED: Decryption verification failed.',
+    });
+    return;
+  }
+
+  // 2. Synchronize with Supabase if token provided
+  const authHeader = req.headers.authorization;
+  const userBearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (supabaseUrl && process.env.VITE_SUPABASE_ANON_KEY && userBearerToken) {
+    try {
+      const userClient = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${userBearerToken}` } },
+        auth: { persistSession: false },
+      });
+
+      await userClient.rpc('submit_challenge', {
+        p_key: challengeKey,
+        p_answer: answer,
+        p_username: username || null,
+      });
+    } catch (err) {
+      console.warn('[server] Supabase token sync notice:', err);
+    }
+  }
+
   if (isCorrect) {
     const nowIso = new Date().toISOString();
+
+    // If this challenge was already solved, return already_solved with 0 additional points
+    if (alreadyCleared) {
+      res.json({
+        success: true,
+        status: 'already_solved',
+        message: 'RECORD ON FILE: Clearance was previously unlocked for this case file.',
+        pointsEarned: 0,
+        hourlyBonus: 0,
+        unlockedEvidence,
+        stagesCompleted: effectiveStagesCompleted,
+      });
+      return;
+    }
 
     // Authoritative hourly score calculation:
     // Base 100 points + 1 pt per elapsed hour from stage release, capped at 24 pts
     const openTimeMs = stageConfig ? new Date(stageConfig.openIso).getTime() : Date.now();
-    const elapsedHours = Math.max(0, Math.floor((Date.now() - openTimeMs) / (3600 * 1000)));
-    const hourlyBonus = Math.min(24, elapsedHours);
-    const awardedPoints = 100 + hourlyBonus;
+    const isPastDeadline = Boolean(stageConfig?.deadlineIso && Date.now() > new Date(stageConfig.deadlineIso).getTime());
+    let hourlyBonus = 0;
+    let awardedPoints = 0;
+    let scoringEligible = true;
+
+    if (isPastDeadline) {
+      // Solved after stage deadline: 0 competitive points (story progression only)
+      awardedPoints = 0;
+      hourlyBonus = 0;
+      scoringEligible = false;
+    } else {
+      const elapsedHours = Math.max(0, Math.floor((Date.now() - openTimeMs) / (3600 * 1000)));
+      hourlyBonus = Math.min(24, elapsedHours);
+      let targetBonus = 0;
+      if (stageNumber === 4 && stageConfig?.targetBonus) {
+        targetBonus = stageConfig.targetBonus;
+      }
+      awardedPoints = 100 + hourlyBonus + targetBonus;
+      scoringEligible = true;
+    }
 
     // Authoritative Supabase Persistence for solves & stage completions
     if (supabaseAdmin && cleanCall) {
@@ -634,7 +750,7 @@ app.post('/api/challenges/submit', async (req, res) => {
               stage_id: stageNumber,
               completed_at: nowIso,
               points_earned: awardedPoints,
-              scoring_eligible: true,
+              scoring_eligible: scoringEligible,
             }, { onConflict: 'participant_id,stage_id' });
 
             console.info(`[CHALLENGE] Authoritatively persisted stage ${stageNumber} (${challengeKey}) with ${awardedPoints} pts for participant ${participantId} (@${cleanCall})`);
@@ -656,8 +772,11 @@ app.post('/api/challenges/submit', async (req, res) => {
         lastProgress: nowIso,
         updatedAt: nowIso,
       };
-      scores[cleanCall].stagesCompleted = Math.max(scores[cleanCall].stagesCompleted, stageNumber);
-      scores[cleanCall].score = Math.max(scores[cleanCall].score, scores[cleanCall].score + awardedPoints);
+
+      if (scores[cleanCall].stagesCompleted < stageNumber) {
+        scores[cleanCall].score += awardedPoints;
+        scores[cleanCall].stagesCompleted = stageNumber;
+      }
       scores[cleanCall].lastProgress = nowIso;
       scores[cleanCall].updatedAt = nowIso;
       savePlayerScores(scores);
@@ -669,6 +788,7 @@ app.post('/api/challenges/submit', async (req, res) => {
       message: 'CLEARANCE GRANTED: Cryptographic key match confirmed.',
       pointsEarned: awardedPoints,
       hourlyBonus,
+      scoringEligible,
       unlockedEvidence,
       stagesCompleted: stageNumber,
     });
@@ -843,11 +963,54 @@ app.get('/api/tickets/mine', async (req, res) => {
 
   const clean = callSign.trim().toLowerCase();
   const all = loadTickets();
-  const mine = all
-    .filter((t) => t.callSign.toLowerCase() === clean)
-    .map(({ staffNotes, ...sanitized }) => sanitized);
+  const ticketMap = new Map<string, any>();
 
-  res.json({ success: true, tickets: mine });
+  // 1. Add local tickets first (sanitized)
+  all
+    .filter((t) => t.callSign.toLowerCase() === clean)
+    .forEach((t) => {
+      const { staffNotes, ...sanitized } = t;
+      ticketMap.set(sanitized.id, sanitized);
+    });
+
+  // 2. Fetch from Supabase if configured
+  if (supabaseAdmin) {
+    try {
+      const { data: dbTickets, error: tErr } = await supabaseAdmin
+        .from('support_tickets')
+        .select('*')
+        .ilike('call_sign', clean)
+        .order('created_at', { ascending: false });
+
+      if (!tErr && Array.isArray(dbTickets)) {
+        dbTickets.forEach((r: any) => {
+          ticketMap.set(r.id, {
+            id: r.id,
+            callSign: r.call_sign || clean,
+            fullName: r.full_name || clean,
+            studentClass: r.student_class || 'Class 9',
+            subject: r.subject,
+            category: r.category,
+            message: r.message,
+            status: r.status || 'OPEN',
+            priority: r.priority || 'NORMAL',
+            staffResponse: r.staff_response,
+            resolvedBy: r.resolved_by,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+          });
+        });
+      }
+    } catch (err) {
+      console.warn('[server] Supabase /api/tickets/mine query notice:', err);
+    }
+  }
+
+  const result = Array.from(ticketMap.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  res.json({ success: true, tickets: result });
 });
 
 // STAFF: Shared Inbox — Fetch ALL tickets across ALL investigators (Requires staff auth)
@@ -1204,7 +1367,6 @@ app.get('/api/teams/mine', async (req, res) => {
           .select(`
             participant_id,
             joined_at,
-            is_creator,
             participants:participant_id (
               id,
               kind,
@@ -1216,7 +1378,6 @@ app.get('/api/teams/mine', async (req, res) => {
               participant_members (
                 user_id,
                 joined_at,
-                is_creator,
                 profiles:user_id (
                   username,
                   full_name
@@ -1237,12 +1398,11 @@ app.get('/api/teams/mine', async (req, res) => {
             .map((m: any) => ({
               callSign: m.profiles?.username || 'Operative',
               fullName: m.profiles?.full_name || m.profiles?.username || 'Operative',
-              isCreator: Boolean(m.is_creator || m.user_id === part.created_by),
+              isCreator: Boolean(m.user_id === part.created_by),
               joinedAt: m.joined_at,
             }));
 
           const isCreator = Boolean(
-            activeMembership.is_creator ||
             part.created_by === prof.id ||
             members.some((m: any) => m.isCreator && m.callSign.toLowerCase() === cleanCall)
           );
@@ -1860,11 +2020,18 @@ app.get('/api/leaderboard', async (req, res) => {
           .from('stage_completions')
           .select('participant_id, stage_id, points_earned');
 
+        const { data: allAdjs } = await supabaseAdmin
+          .from('score_adjustments')
+          .select('participant_id, points');
+
         const solvesMap = new Map<string, number>();
         const compsMap = new Map<string, number>();
         allComps?.forEach((c: any) => {
           solvesMap.set(c.participant_id, (solvesMap.get(c.participant_id) || 0) + (c.points_earned || 0));
           compsMap.set(c.participant_id, Math.max(compsMap.get(c.participant_id) || 0, c.stage_id || 0));
+        });
+        allAdjs?.forEach((a: any) => {
+          solvesMap.set(a.participant_id, (solvesMap.get(a.participant_id) || 0) + (a.points || 0));
         });
 
         for (const p of parts) {
@@ -1897,11 +2064,21 @@ app.get('/api/leaderboard', async (req, res) => {
 
           // Merge score from DB solves or live client sync
           const dbScore = solvesMap.get(p.id) || 0;
-          const liveScore = scores[callKey]?.score || 0;
-          const finalScore = Math.max(dbScore, liveScore);
-
           const dbStages = compsMap.get(p.id) || 0;
-          const liveStages = scores[callKey]?.stagesCompleted || 0;
+
+          let liveScore = scores[callKey]?.score || 0;
+          let liveStages = scores[callKey]?.stagesCompleted || 0;
+          if (p.kind === 'team') {
+            for (const m of activeMembers) {
+              const mk = (m.username || '').toLowerCase().trim();
+              if (scores[mk]) {
+                liveScore = Math.max(liveScore, scores[mk].score || 0);
+                liveStages = Math.max(liveStages, scores[mk].stagesCompleted || 0);
+              }
+            }
+          }
+
+          const finalScore = Math.max(dbScore, liveScore);
           const finalStages = Math.max(dbStages, liveStages);
 
           const userClass = firstProfile?.student_class || scores[callKey]?.studentClass || 'Class 9';
@@ -1946,37 +2123,85 @@ app.get('/api/leaderboard', async (req, res) => {
   }
 
   // 2. Offline Fallback ONLY: Process purely local scores when Supabase is disconnected
-  if (!supabaseAdmin && (kindFilter === 'all' || kindFilter === 'solo')) {
-    for (const [key, pScore] of Object.entries(scores)) {
-      if (processedCallSigns.has(key)) continue;
-
-      if (
-        pScore.excludeFromLeaderboard ||
-        pScore.hasStageOverride ||
-        pScore.isStaff ||
-        overrides[key]?.excludeFromLeaderboard ||
-        (overrides[key]?.stages && Object.keys(overrides[key].stages).length > 0) ||
-        key === 'rudrapratapj.0562@gmail.com' ||
-        key === 'rudrapratapf.0562@gmail.com'
-      ) {
-        continue;
+  if (!supabaseAdmin) {
+    const activeTeamMemberCallsigns = new Set<string>();
+    for (const tm of allTeams) {
+      if (tm.retired) continue;
+      for (const m of tm.members) {
+        activeTeamMemberCallsigns.add(m.callSign.toLowerCase().trim());
       }
+    }
 
-      if (classFilter && classFilter !== 'all' && pScore.studentClass !== classFilter) {
-        continue;
+    // A. Tactical Teams
+    if (kindFilter === 'all' || kindFilter === 'team') {
+      for (const tm of allTeams) {
+        if (tm.retired) continue;
+        const validMembers = tm.members.filter((m) => {
+          const mk = m.callSign.toLowerCase().trim();
+          return !mk.includes('rudrapratapj') && !mk.includes('rudrapratapf') && !overrides[mk]?.excludeFromLeaderboard && !scores[mk]?.excludeFromLeaderboard;
+        });
+        if (validMembers.length === 0) continue;
+
+        const teamScore = Math.max(0, ...validMembers.map((m) => scores[m.callSign.toLowerCase().trim()]?.score || 0));
+        const teamStages = Math.max(0, ...validMembers.map((m) => scores[m.callSign.toLowerCase().trim()]?.stagesCompleted || 0));
+        const teamClass = validMembers.map((m) => scores[m.callSign.toLowerCase().trim()]?.studentClass).find(Boolean) || 'Class 9';
+
+        if (classFilter && classFilter !== 'all' && teamClass !== classFilter) continue;
+
+        candidates.push({
+          rank: 0,
+          name: tm.name,
+          kind: 'team',
+          score: teamScore,
+          stagesCompleted: teamStages,
+          currentStage: Math.min(7, teamStages + 1),
+          completionPercentage: Math.round((teamStages / 7) * 100),
+          lastProgress: tm.createdAt,
+          studentClass: teamClass,
+          members: validMembers.map((m) => m.callSign),
+          teamSize: validMembers.length,
+        });
       }
+    }
 
-      candidates.push({
-        rank: 0,
-        name: pScore.callSign,
-        kind: 'solo',
-        score: pScore.score,
-        stagesCompleted: pScore.stagesCompleted,
-        currentStage: Math.min(7, pScore.stagesCompleted + 1),
-        completionPercentage: Math.round((pScore.stagesCompleted / 7) * 100),
-        lastProgress: pScore.lastProgress || pScore.updatedAt,
-        studentClass: pScore.studentClass,
-      });
+    // B. Solo Operatives
+    if (kindFilter === 'all' || kindFilter === 'solo') {
+      for (const [key, pScore] of Object.entries(scores)) {
+        if (processedCallSigns.has(key)) continue;
+
+        // When in 'all' view, unaffiliated operatives or non-team members appear as solo
+        if (kindFilter === 'all' && activeTeamMemberCallsigns.has(key)) {
+          continue;
+        }
+
+        if (
+          pScore.excludeFromLeaderboard ||
+          pScore.hasStageOverride ||
+          pScore.isStaff ||
+          overrides[key]?.excludeFromLeaderboard ||
+          (overrides[key]?.stages && Object.keys(overrides[key].stages).length > 0) ||
+          key === 'rudrapratapj.0562@gmail.com' ||
+          key === 'rudrapratapf.0562@gmail.com'
+        ) {
+          continue;
+        }
+
+        if (classFilter && classFilter !== 'all' && pScore.studentClass !== classFilter) {
+          continue;
+        }
+
+        candidates.push({
+          rank: 0,
+          name: pScore.callSign,
+          kind: 'solo',
+          score: pScore.score,
+          stagesCompleted: pScore.stagesCompleted,
+          currentStage: Math.min(7, pScore.stagesCompleted + 1),
+          completionPercentage: Math.round((pScore.stagesCompleted / 7) * 100),
+          lastProgress: pScore.lastProgress || pScore.updatedAt,
+          studentClass: pScore.studentClass,
+        });
+      }
     }
   }
 
