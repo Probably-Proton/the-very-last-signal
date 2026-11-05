@@ -1,0 +1,28 @@
+{
+  "inv_alice": {
+    "callSign": "inv_alice",
+    "fullName": "Alice Vance",
+    "studentClass": "Class 9",
+    "score": 120,
+    "stagesCompleted": 1,
+    "lastProgress": "2026-11-05T05:05:41.277Z",
+    "excludeFromLeaderboard": false,
+    "hasStageOverride": false,
+    "teamName": "Cipher Vanguard",
+    "isStaff": false,
+    "updatedAt": "2026-11-05T05:05:41.277Z"
+  },
+  "inv_bob": {
+    "callSign": "inv_bob",
+    "fullName": "Bob Miller",
+    "studentClass": "Class 9",
+    "score": 0,
+    "stagesCompleted": 0,
+    "lastProgress": "2026-11-05T05:05:41.281Z",
+    "excludeFromLeaderboard": false,
+    "hasStageOverride": false,
+    "teamName": "Cipher Vanguard",
+    "isStaff": false,
+    "updatedAt": "2026-11-05T05:05:41.281Z"
+  }
+}
