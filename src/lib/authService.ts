@@ -338,48 +338,84 @@ export async function loginUser(
 
   if (isSupabaseConfigured && supabase) {
     try {
-      let emailToTry: string;
-      const isEmail = cleanInput.includes('@');
+      let authUser: any = null;
+      // Strip leading @ if entered by operative (e.g. "@Cipher_echo" -> "Cipher_echo")
+      const normalizedInput = cleanInput.replace(/^@+/, '').trim();
+      const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanInput);
 
       if (isEmail) {
-        emailToTry = cleanInput.toLowerCase();
-      } else {
-        // Check if we have a locally remembered email mapping for this call-sign
-        let cachedEmail: string | null = null;
-        try {
-          cachedEmail = localStorage.getItem('tls_callsign_email_' + cleanInput.toLowerCase());
-        } catch {}
-
-        emailToTry = cachedEmail || callSignToInternalEmail(cleanInput);
-      }
-
-      let { data, error } = await supabase.auth.signInWithPassword({
-        email: emailToTry,
-        password: passwordPlain,
-      });
-
-      // If call-sign login with cached/internal email failed, try internal fallback if not already tried
-      if (error && !isEmail && emailToTry !== callSignToInternalEmail(cleanInput)) {
-        const fallbackRes = await supabase.auth.signInWithPassword({
-          email: callSignToInternalEmail(cleanInput),
+        // Direct email login
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanInput.toLowerCase(),
           password: passwordPlain,
         });
-        if (!fallbackRes.error && fallbackRes.data.user) {
-          data = fallbackRes.data;
-          error = null;
+        if (error || !data?.user) {
+          // Check local prototype fallback if live email sign in failed
+          const localCheck = await loginPrototypeUser(cleanInput, passwordPlain);
+          if (localCheck.success && localCheck.user) {
+            return {
+              ...localCheck,
+              mode: 'prototype_local',
+            };
+          }
+          return {
+            success: false,
+            error: error?.message || 'Invalid case credentials. Please check your email and password.',
+            mode: 'live_supabase',
+          };
         }
+        authUser = data.user;
+      } else {
+        // Username-based login via secure server proxy that resolves username to auth identity
+        const res = await fetch('/api/auth/username-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: normalizedInput,
+            password: passwordPlain,
+          }),
+        });
+
+        const json = await res.json();
+        if (!res.ok || !json.success || !json.session) {
+          // Check local prototype fallback if server username lookup failed
+          const localCheck = await loginPrototypeUser(normalizedInput, passwordPlain);
+          if (localCheck.success && localCheck.user) {
+            return {
+              ...localCheck,
+              mode: 'prototype_local',
+            };
+          }
+
+          return {
+            success: false,
+            error: json.error || 'Invalid case credentials. Please check your call-sign and password.',
+            mode: 'live_supabase',
+          };
+        }
+
+        // Establish the real Supabase Auth session in the browser client
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: json.session.access_token,
+          refresh_token: json.session.refresh_token,
+        });
+
+        if (sessionError) {
+          console.warn('[authService] Failed setting Supabase session from username login:', sessionError);
+        }
+
+        authUser = json.user;
       }
 
-      if (error || !data?.user) {
-        const errorMsg = !isEmail
-          ? 'Invalid case credentials. If you registered with a student email, try logging in with your email address.'
-          : 'Invalid case credentials. Please check your email and password.';
+      if (!authUser) {
         return {
           success: false,
-          error: errorMsg,
+          error: 'Authentication failed. Please verify your credentials and network connection.',
           mode: 'live_supabase',
         };
       }
+
+      const data = { user: authUser };
 
       // Fetch profile
       const { data: profile } = await supabase
@@ -442,22 +478,18 @@ export async function loginUser(
 
       setLocalActiveSession(userObj);
 
-      // Synchronize verified override and exclusion into local progress record without altering scores/solves
+      // Synchronize verified override, team membership, and completions from Supabase
       try {
         const currentProg = getUserProgress(resolvedCallSign);
-        let changed = false;
-        const nextProg = { ...currentProg };
+        let nextProg = { ...currentProg };
         if (nextProg.hasStageOverride !== hasStageOverride) {
           nextProg.hasStageOverride = hasStageOverride;
-          changed = true;
         }
         if (nextProg.excludeFromLeaderboard !== excludeFromLeaderboard) {
           nextProg.excludeFromLeaderboard = excludeFromLeaderboard;
-          changed = true;
         }
-        if (changed) {
-          saveUserProgress(nextProg);
-        }
+        nextProg = await syncUserDatabaseState(data.user.id, resolvedCallSign, nextProg);
+        saveUserProgress(nextProg);
       } catch {}
 
       return {
@@ -567,6 +599,69 @@ export async function verifyParticipantLeaderboardExclusion(userId?: string): Pr
 }
 
 /**
+ * Synchronize authoritative completions and team membership from Supabase into local progress.
+ */
+async function syncUserDatabaseState(userId: string, _callSign: string, nextProg: UserProgress): Promise<UserProgress> {
+  if (!isSupabaseConfigured || !supabase) return nextProg;
+  try {
+    // 1. Fetch active participant and team membership
+    const { data: memberRows } = await supabase
+      .from('participant_members')
+      .select('participant_id, participants(id, kind, name, invite_code, retired)')
+      .eq('user_id', userId)
+      .is('left_at', null)
+      .limit(1);
+
+    const activeMember = memberRows?.[0];
+    const participant = activeMember?.participants as any;
+    const participantId = activeMember?.participant_id;
+
+    if (participant && !participant.retired && participant.kind === 'team') {
+      if (participant.name && nextProg.teamName !== participant.name) {
+        nextProg.teamName = participant.name;
+      }
+      if (participant.invite_code && nextProg.teamCode !== participant.invite_code) {
+        nextProg.teamCode = participant.invite_code;
+      }
+    }
+
+    // 2. Fetch authoritative completions from stage_completions
+    if (participantId) {
+      const { data: completions } = await supabase
+        .from('stage_completions')
+        .select('stage_id, points_earned')
+        .eq('participant_id', participantId);
+
+      if (Array.isArray(completions) && completions.length > 0) {
+        let maxStage = 0;
+        let totalDbScore = 0;
+        const stageScoresMap: Record<number, number> = { ...nextProg.stageScores };
+
+        for (const c of completions) {
+          const sId = Number(c.stage_id);
+          const pts = Number(c.points_earned) || 100;
+          if (sId > maxStage) maxStage = sId;
+          totalDbScore += pts;
+          stageScoresMap[sId] = Math.max(stageScoresMap[sId] || 0, pts);
+        }
+
+        if (maxStage > nextProg.stagesCompleted) {
+          nextProg.stagesCompleted = maxStage;
+          nextProg.activeStage = Math.max(nextProg.activeStage, Math.min(7, maxStage + 1));
+        }
+        if (totalDbScore > nextProg.score) {
+          nextProg.score = totalDbScore;
+        }
+        nextProg.stageScores = stageScoresMap;
+      }
+    }
+  } catch (err) {
+    console.warn('[authService] Error syncing database progress/team state:', err);
+  }
+  return nextProg;
+}
+
+/**
  * Restore current session on page refresh.
  */
 export async function restoreSession(): Promise<PrototypeUser | null> {
@@ -627,22 +722,18 @@ export async function restoreSession(): Promise<PrototypeUser | null> {
 
         setLocalActiveSession(userObj);
 
-        // Synchronize verified override and exclusion into local progress record without altering scores/solves
+        // Synchronize verified override, team membership, and completions from Supabase
         try {
           const currentProg = getUserProgress(callSign);
-          let changed = false;
-          const nextProg = { ...currentProg };
+          let nextProg = { ...currentProg };
           if (nextProg.hasStageOverride !== hasStageOverride) {
             nextProg.hasStageOverride = hasStageOverride;
-            changed = true;
           }
           if (nextProg.excludeFromLeaderboard !== excludeFromLeaderboard) {
             nextProg.excludeFromLeaderboard = excludeFromLeaderboard;
-            changed = true;
           }
-          if (changed) {
-            saveUserProgress(nextProg);
-          }
+          nextProg = await syncUserDatabaseState(data.session.user.id, callSign, nextProg);
+          saveUserProgress(nextProg);
         } catch {}
 
         return userObj;

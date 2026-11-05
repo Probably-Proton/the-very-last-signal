@@ -538,7 +538,7 @@ export function InvestigationDashboard({
                 className="button bg-[#19271c] hover:bg-[#223627] text-[#8deb9e] border border-[#3e6849] py-3 px-4 text-xs font-mono font-bold tracking-wider flex items-center gap-2 shadow"
               >
                 <FolderOpen size={14} className="text-[#8deb9e]" />
-                <span>First Directive (5 Case Files)</span>
+                <span>First Directive (6 Case Files)</span>
               </button>
 
               {directive.targetEvidenceId && (

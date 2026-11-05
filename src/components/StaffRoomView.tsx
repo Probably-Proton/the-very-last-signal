@@ -31,6 +31,7 @@ import {
   Search,
   Filter,
   RotateCcw,
+  RefreshCw,
   Sparkles,
   ChevronRight,
   Eye,
@@ -51,7 +52,24 @@ import {
   Inbox,
   Send,
   MessageSquare,
+  Bell,
+  Pin,
+  Trash2,
+  CheckCircle2,
+  MessageCircle,
 } from 'lucide-react';
+import {
+  fetchStaffAnnouncements,
+  createStaffAnnouncement,
+  deleteStaffAnnouncement,
+  fetchStaffConversations,
+  fetchConversationMessages,
+  sendStaffMessage,
+  updateConversationStatus,
+  type StaffAnnouncement,
+  type StaffConversation,
+  type ConversationMessage,
+} from '../lib/communicationsService';
 import {
   PrototypeUser,
   UserProgress,
@@ -69,6 +87,8 @@ import {
   isGameLaunched,
   formatToIST,
   getStageDisplayInfo,
+  setDynamicRegistrationOpen,
+  fetchAuthoritativeSettings,
 } from '../lib/stageConfig';
 import { evidence, stages, CASE_ID, EvidenceItem } from '../lib/mockData';
 import { ISTClockWidget } from './ISTClockWidget';
@@ -105,6 +125,7 @@ type StaffTab =
   | 'participants'
   | 'stages'
   | 'tickets'
+  | 'communications'
   | 'dispatches'
   | 'activity'
   | 'controls'
@@ -204,6 +225,101 @@ export function StaffRoomView({
   const [dispatchAudience, setDispatchAudience] = useState<'all' | 'targeted'>('all');
   const [dispatchTargetCallSign, setDispatchTargetCallSign] = useState('');
   const [dispatchText, setDispatchText] = useState('');
+
+  // Communications & Direct Desk State
+  const [commSubTab, setCommSubTab] = useState<'announcements' | 'conversations' | 'dispatches'>('announcements');
+  const [announcements, setAnnouncements] = useState<StaffAnnouncement[]>([]);
+  const [announcementTitle, setAnnouncementTitle] = useState('');
+  const [announcementMessage, setAnnouncementMessage] = useState('');
+  const [announcementTargetType, setAnnouncementTargetType] = useState<'all' | 'stage' | 'team' | 'player'>('all');
+  const [announcementTargetValue, setAnnouncementTargetValue] = useState('');
+  const [announcementPinned, setAnnouncementPinned] = useState(false);
+  const [isPostingAnnouncement, setIsPostingAnnouncement] = useState(false);
+
+  // Direct Player Conversations State
+  const [conversations, setConversations] = useState<StaffConversation[]>([]);
+  const [convStatusFilter, setConvStatusFilter] = useState<'all' | 'open' | 'resolved'>('all');
+  const [convSearch, setConvSearch] = useState('');
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  const [convMessages, setConvMessages] = useState<ConversationMessage[]>([]);
+  const [staffReplyText, setStaffReplyText] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+
+  // Authoritative Registration Toggle State
+  const [isRegOpen, setIsRegOpen] = useState<boolean>(() => isRegistrationOpen());
+  const [isUpdatingReg, setIsUpdatingReg] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetchAuthoritativeSettings().then((s) => {
+      setIsRegOpen(s.registrationOpen);
+    });
+  }, []);
+
+  const handleToggleRegistration = async () => {
+    if (!staffToken) return;
+    setIsUpdatingReg(true);
+    try {
+      const nextState = !isRegOpen;
+      const resp = await fetch('/api/staff/settings/registration', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${staffToken}`,
+        },
+        body: JSON.stringify({ open: nextState }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        setIsRegOpen(data.registrationOpen);
+        setDynamicRegistrationOpen(data.registrationOpen);
+        tacticalAudio.playSuccess();
+        showFeedback(`Registration portal authoritatively ${data.registrationOpen ? 'OPENED' : 'CLOSED'}.`);
+      } else {
+        tacticalAudio.playError();
+        showFeedback(data.error || 'Failed to update registration status.');
+      }
+    } catch (err) {
+      tacticalAudio.playError();
+      showFeedback('Network error updating registration status.');
+    } finally {
+      setIsUpdatingReg(false);
+    }
+  };
+
+  const reloadCommunications = async () => {
+    if (!staffToken) return;
+    try {
+      const [anns, convs] = await Promise.all([
+        fetchStaffAnnouncements(staffToken),
+        fetchStaffConversations(staffToken),
+      ]);
+      setAnnouncements(anns);
+      setConversations(convs);
+    } catch (err) {
+      console.warn('[StaffRoomView] Communications load error:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (unlocked && staffToken) {
+      reloadCommunications();
+      const interval = setInterval(reloadCommunications, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [unlocked, staffToken]);
+
+  useEffect(() => {
+    if (selectedConvId && staffToken) {
+      setIsLoadingMessages(true);
+      fetchConversationMessages(staffToken, selectedConvId).then((msgs) => {
+        setConvMessages(msgs);
+        setIsLoadingMessages(false);
+      });
+    } else {
+      setConvMessages([]);
+    }
+  }, [selectedConvId, staffToken]);
 
   // Validate active staff session with server on mount
   useEffect(() => {
@@ -341,20 +457,99 @@ export function StaffRoomView({
     showFeedback('Staff console session terminated and locked.');
   };
 
-  // Retrieve real registered users from prototype local storage
+  // Real registered participants from server / Supabase
+  const [serverParticipants, setServerParticipants] = useState<any[]>([]);
+  const [isLoadingParticipants, setIsLoadingParticipants] = useState(false);
+
+  const fetchLiveParticipants = async () => {
+    if (!unlocked || !staffToken) return;
+    setIsLoadingParticipants(true);
+    try {
+      const res = await fetch('/api/staff/participants', {
+        headers: { Authorization: `Bearer ${staffToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.participants)) {
+          setServerParticipants(data.participants);
+        }
+      }
+    } catch (err) {
+      console.warn('[StaffRoomView] Failed fetching live participants:', err);
+    } finally {
+      setIsLoadingParticipants(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveParticipants();
+  }, [unlocked, staffToken, activeTab]);
+
+  // Merge real database participants with prototype local storage
   const registeredUsers = useMemo(() => {
-    return getAllUsers();
-  }, [unlocked, activeTab, feedbackNotice]);
+    const local = getAllUsers();
+    if (serverParticipants.length === 0) return local;
+
+    const map = new Map<string, PrototypeUser>();
+    for (const u of local) {
+      map.set(u.callSign.toLowerCase().trim(), u);
+    }
+
+    for (const sp of serverParticipants) {
+      const key = sp.callSign.toLowerCase().trim();
+      const existing = map.get(key);
+
+      map.set(key, {
+        id: sp.id,
+        callSign: sp.callSign,
+        fullName: sp.fullName || sp.callSign,
+        studentClass: sp.studentClass || 'Class 9',
+        admissionNumberMasked: sp.admissionNumberMasked || 'ADM-••••0000',
+        admissionHash: '',
+        passwordHash: '',
+        school: 'School Division',
+        registeredAt: sp.createdAt || new Date().toISOString(),
+        role: sp.role,
+        isStaff: Boolean(sp.isStaff),
+        ...existing,
+        excludeFromLeaderboard: Boolean(sp.excludeFromLeaderboard),
+        hasStageOverride: Boolean(sp.hasStageOverride),
+      });
+    }
+
+    return Array.from(map.values());
+  }, [serverParticipants, unlocked, activeTab, feedbackNotice]);
 
   // Precompute user progress records for metrics & search
   const participantsWithProgress = useMemo(() => {
     return registeredUsers.map((u) => {
-      const p = u.callSign.toLowerCase() === progress.callSign.toLowerCase()
-        ? progress
-        : getUserProgress(u.callSign);
-      return { user: u, progress: p };
+      const sp = serverParticipants.find(
+        (p) => p.callSign.toLowerCase().trim() === u.callSign.toLowerCase().trim()
+      );
+      const baseProg =
+        u.callSign.toLowerCase().trim() === progress.callSign.toLowerCase().trim()
+          ? progress
+          : getUserProgress(u.callSign);
+
+      const mergedProgress: UserProgress = {
+        ...baseProg,
+        callSign: u.callSign,
+        score: sp ? Math.max(sp.score || 0, baseProg.score || 0) : baseProg.score,
+        stagesCompleted: sp ? Math.max(sp.stagesCompleted || 0, baseProg.stagesCompleted || 0) : baseProg.stagesCompleted,
+        activeStage: sp ? Math.max(sp.activeStage || 1, baseProg.activeStage || 1) : baseProg.activeStage,
+        hasStageOverride: Boolean(u.hasStageOverride || baseProg.hasStageOverride),
+        excludeFromLeaderboard: Boolean(u.excludeFromLeaderboard || baseProg.excludeFromLeaderboard),
+        teamName: sp?.kind === 'team' ? sp.name : baseProg.teamName,
+      };
+
+      return {
+        user: u,
+        progress: mergedProgress,
+        participantKind: sp?.kind || (mergedProgress.teamName ? 'team' : 'solo'),
+        teamSize: sp?.teamSize || (mergedProgress.teamName ? 1 : undefined),
+      };
     });
-  }, [registeredUsers, progress]);
+  }, [registeredUsers, serverParticipants, progress]);
 
   // Filtered participants list
   const filteredParticipants = useMemo(() => {
@@ -543,6 +738,21 @@ export function StaffRoomView({
       }
     }
 
+    if (staffToken) {
+      fetch('/api/staff/override-stage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${staffToken}`,
+        },
+        body: JSON.stringify({
+          callSign: targetUser.callSign,
+          stage: 'all',
+          enabled: nextState,
+        }),
+      }).catch(() => {});
+    }
+
     const updatedProg: UserProgress = {
       ...targetProgress,
       hasStageOverride: nextState,
@@ -559,6 +769,8 @@ export function StaffRoomView({
       user: { ...targetUser, hasStageOverride: nextState },
       progress: updatedProg,
     });
+
+    fetchLiveParticipants();
 
     showFeedback(
       nextState
@@ -609,6 +821,20 @@ export function StaffRoomView({
       }
     }
 
+    if (staffToken) {
+      fetch('/api/staff/leaderboard-exclusion', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${staffToken}`,
+        },
+        body: JSON.stringify({
+          callSign: targetUser.callSign,
+          excluded: nextState,
+        }),
+      }).catch(() => {});
+    }
+
     const updatedProg: UserProgress = {
       ...targetProgress,
       excludeFromLeaderboard: nextState,
@@ -625,6 +851,8 @@ export function StaffRoomView({
       user: { ...targetUser, excludeFromLeaderboard: nextState },
       progress: updatedProg,
     });
+
+    fetchLiveParticipants();
 
     showFeedback(
       nextState
@@ -924,6 +1152,11 @@ export function StaffRoomView({
             label: `Support Desk (${allTickets.filter((t) => t.status === 'OPEN').length} Open)`,
             icon: LifeBuoy,
           },
+          {
+            key: 'communications',
+            label: `Communications (${conversations.filter((c) => c.unreadStaffCount > 0).length} Unread / ${announcements.length} Bulletins)`,
+            icon: MessageSquare,
+          },
           { key: 'dispatches', label: `Dispatches (${customDispatches.length})`, icon: Radio },
           { key: 'activity', label: `Activity & Evidence (${progress?.organizerAuditLog?.length || 0})`, icon: Activity },
           { key: 'controls', label: 'Game Controls', icon: Sliders },
@@ -954,16 +1187,42 @@ export function StaffRoomView({
         <div className="space-y-6">
           {/* Key Status Cards */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="panel p-4">
-              <span className="eyebrow block text-muted-foreground">REGISTRATION STATUS</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className={`font-mono text-2xl font-light ${isRegistrationOpen() ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {isRegistrationOpen() ? 'OPEN' : 'PRE-REGISTRATION'}
+            <div className="panel p-4 flex flex-col justify-between">
+              <div>
+                <span className="eyebrow block text-muted-foreground">REGISTRATION STATUS</span>
+                <div className="flex items-baseline justify-between gap-2 mt-2">
+                  <span className={`font-mono text-2xl font-light ${isRegOpen ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {isRegOpen ? 'OPEN' : 'CLOSED'}
+                  </span>
+                  <span className={`text-[10px] font-mono uppercase px-1.5 py-0.5 border ${isRegOpen ? 'border-emerald-700/60 text-emerald-400' : 'border-amber-700/60 text-amber-400'}`}>
+                    {isRegOpen ? 'ACCEPTING' : 'SEALED'}
+                  </span>
+                </div>
+                <span className="font-mono text-[10px] text-muted-foreground block mt-1">
+                  Intake: {REGISTRATION_OPEN_IST}
                 </span>
               </div>
-              <span className="font-mono text-[10px] text-muted-foreground block mt-1">
-                Intake: {REGISTRATION_OPEN_IST}
-              </span>
+              <div className="mt-3 pt-2 border-t border-border/60">
+                <button
+                  onClick={handleToggleRegistration}
+                  disabled={isUpdatingReg}
+                  className={`w-full py-1.5 px-2 text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-1.5 border transition-colors ${
+                    isRegOpen
+                      ? 'border-amber-600/60 bg-amber-950/30 text-amber-300 hover:bg-amber-950/60'
+                      : 'border-emerald-600/60 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-950/60'
+                  }`}
+                  title={isRegOpen ? 'Halt new participant intakes' : 'Open intake portal for students'}
+                >
+                  {isUpdatingReg ? (
+                    <RefreshCw size={12} className="animate-spin" />
+                  ) : isRegOpen ? (
+                    <Lock size={12} />
+                  ) : (
+                    <Unlock size={12} />
+                  )}
+                  <span>{isUpdatingReg ? 'Updating...' : isRegOpen ? 'Close Registration' : 'Open Registration'}</span>
+                </button>
+              </div>
             </div>
 
             <div className="panel p-4">
@@ -1161,10 +1420,24 @@ export function StaffRoomView({
             </div>
 
             <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/60">
-              <span>
-                Showing {filteredParticipants.length} of {registeredUsers.length} registered operatives
-              </span>
-              <span>Local Prototype Registry: tls_prototype_users_v1</span>
+              <div className="flex items-center gap-3">
+                <span>
+                  Showing {filteredParticipants.length} of {registeredUsers.length} registered operatives
+                </span>
+                <span className="text-emerald-400 font-bold">
+                  {serverParticipants.length > 0
+                    ? `• Live Registry: ${serverParticipants.length} Database Operatives`
+                    : '• Local Storage Mode'}
+                </span>
+              </div>
+              <button
+                onClick={fetchLiveParticipants}
+                disabled={isLoadingParticipants}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 border border-border px-2 py-0.5"
+              >
+                <RefreshCw size={11} className={isLoadingParticipants ? 'animate-spin' : ''} />
+                <span>{isLoadingParticipants ? 'Refreshing...' : 'Refresh Roster'}</span>
+              </button>
             </div>
           </div>
 
@@ -1175,7 +1448,7 @@ export function StaffRoomView({
               <p className="text-foreground font-semibold">No matching operatives found</p>
               <p className="max-w-md mx-auto">
                 {registeredUsers.length === 0
-                  ? 'No participants have registered in this browser session yet. Direct students to the registration portal to populate records.'
+                  ? 'No participants found in registry. Ensure database connection is active or enroll participants via the intake portal.'
                   : 'Adjust your search query or class filter to view other registered operatives.'}
               </p>
             </div>
@@ -1186,17 +1459,18 @@ export function StaffRoomView({
                   <thead>
                     <tr className="bg-[#141615] border-b border-border text-[10px] uppercase text-muted-foreground">
                       <th className="p-3">Operative Call-Sign</th>
+                      <th className="p-3">Type</th>
                       <th className="p-3">Full Name</th>
                       <th className="p-3">Class</th>
                       <th className="p-3">Admission</th>
                       <th className="p-3">Active Stage</th>
                       <th className="p-3">Score</th>
-                      <th className="p-3">Target Choice</th>
+                      <th className="p-3">Status</th>
                       <th className="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {filteredParticipants.map(({ user: u, progress: p }) => {
+                    {filteredParticipants.map(({ user: u, progress: p, participantKind }) => {
                       const isActiveSession = u.callSign.toLowerCase() === progress.callSign.toLowerCase();
 
                       return (
@@ -1216,6 +1490,17 @@ export function StaffRoomView({
                               )}
                             </div>
                           </td>
+                          <td className="p-3">
+                            <span
+                              className={`text-[9px] px-1.5 py-0.5 border font-bold uppercase tracking-wider ${
+                                participantKind === 'team' || p.teamName
+                                  ? 'bg-amber-950/60 border-amber-600/60 text-amber-300'
+                                  : 'bg-[#18261c] border-[#3e6849] text-[#8deb9e]'
+                              }`}
+                            >
+                              {participantKind === 'team' || p.teamName ? `TEAM: ${p.teamName || 'UNIT'}` : 'SOLO'}
+                            </span>
+                          </td>
                           <td className="p-3 text-muted-foreground">{u.fullName}</td>
                           <td className="p-3">{u.studentClass}</td>
                           <td className="p-3 text-muted-foreground">{u.admissionNumberMasked}</td>
@@ -1229,13 +1514,23 @@ export function StaffRoomView({
                           </td>
                           <td className="p-3 font-bold text-crimson">{p.score || 0} pts</td>
                           <td className="p-3">
-                            {p.targetLocationChoice ? (
-                              <span className="text-[11px] px-1.5 py-0.5 border border-border">
-                                Site 0{p.targetLocationChoice}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground text-[10px]">Unselected</span>
-                            )}
+                            <div className="flex flex-col gap-0.5">
+                              {p.hasStageOverride && (
+                                <span className="text-[9px] text-amber-400 font-bold">
+                                  ⚡ OVERRIDE
+                                </span>
+                              )}
+                              {p.excludeFromLeaderboard && (
+                                <span className="text-[9px] text-red-400">
+                                  🚫 UNRANKED
+                                </span>
+                              )}
+                              {!p.hasStageOverride && !p.excludeFromLeaderboard && (
+                                <span className="text-[9px] text-emerald-400">
+                                  ✓ STANDARD
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3 text-right">
                             <button
@@ -1867,6 +2162,540 @@ export function StaffRoomView({
               ) : null}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          TAB: COMMUNICATIONS & DIRECT DESK (ANNOUNCEMENTS & 2-WAY PLAYER CHAT)
+          ===================================================================== */}
+      {activeTab === 'communications' && (
+        <div className="space-y-6 font-mono text-xs">
+          {/* Sub-navigation selector */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCommSubTab('announcements')}
+                className={`px-3 py-1.5 border transition-all flex items-center gap-1.5 ${
+                  commSubTab === 'announcements'
+                    ? 'border-crimson bg-[#181212] text-foreground font-bold'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Bell size={13} className={commSubTab === 'announcements' ? 'text-crimson' : ''} />
+                <span>Official Announcements ({announcements.length})</span>
+              </button>
+
+              <button
+                onClick={() => setCommSubTab('conversations')}
+                className={`px-3 py-1.5 border transition-all flex items-center gap-1.5 ${
+                  commSubTab === 'conversations'
+                    ? 'border-crimson bg-[#181212] text-foreground font-bold'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <MessageSquare size={13} className={commSubTab === 'conversations' ? 'text-crimson' : ''} />
+                <span>Direct Investigator Desk</span>
+                {conversations.some((c) => c.unreadStaffCount > 0) && (
+                  <span className="size-2 rounded-full bg-crimson animate-pulse" />
+                )}
+              </button>
+            </div>
+
+            <button
+              onClick={() => reloadCommunications()}
+              className="button button-secondary text-xs flex items-center gap-1.5 py-1 px-2.5"
+            >
+              <RefreshCw size={12} />
+              <span>Refresh Comms</span>
+            </button>
+          </div>
+
+          {/* SUB-VIEW 1: ANNOUNCEMENTS */}
+          {commSubTab === 'announcements' && (
+            <div className="grid gap-6 lg:grid-cols-12">
+              {/* Left Composer (5 cols) */}
+              <div className="lg:col-span-5 panel p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-border pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Bell size={15} className="text-crimson" />
+                    <span className="font-bold text-foreground uppercase tracking-wider">
+                      Post New Announcement
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">OFFICIAL BULLETIN</span>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!announcementTitle.trim() || !announcementMessage.trim()) return;
+                    setIsPostingAnnouncement(true);
+                    try {
+                      const res = await createStaffAnnouncement(staffToken, {
+                        title: announcementTitle.trim(),
+                        message: announcementMessage.trim(),
+                        targetType: announcementTargetType,
+                        targetValue: announcementTargetValue.trim() || undefined,
+                        pinned: announcementPinned,
+                      });
+                      if (res.success) {
+                        setAnnouncementTitle('');
+                        setAnnouncementMessage('');
+                        setAnnouncementTargetType('all');
+                        setAnnouncementTargetValue('');
+                        setAnnouncementPinned(false);
+                        showFeedback('Announcement broadcasted to investigators.');
+                        reloadCommunications();
+                      } else {
+                        showFeedback(res.error || 'Failed to post announcement.');
+                      }
+                    } catch {
+                      showFeedback('Network error posting announcement.');
+                    } finally {
+                      setIsPostingAnnouncement(false);
+                    }
+                  }}
+                  className="space-y-3.5 pt-1"
+                >
+                  <div>
+                    <label className="block text-[10px] uppercase text-muted-foreground mb-1 font-bold">
+                      Bulletin Title *
+                    </label>
+                    <input
+                      type="text"
+                      value={announcementTitle}
+                      onChange={(e) => setAnnouncementTitle(e.target.value)}
+                      placeholder="e.g. Stage 02 Declassification Advisory..."
+                      className="w-full bg-[#0c0c0b] border border-border p-2 text-xs text-foreground focus:outline-none focus:border-crimson"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase text-muted-foreground mb-1 font-bold">
+                        Target Audience
+                      </label>
+                      <select
+                        value={announcementTargetType}
+                        onChange={(e) => setAnnouncementTargetType(e.target.value as any)}
+                        className="w-full bg-[#0c0c0b] border border-border p-2 text-xs text-foreground focus:outline-none focus:border-crimson"
+                      >
+                        <option value="all">All Investigators</option>
+                        <option value="stage">Specific Stage</option>
+                        <option value="team">Specific Team</option>
+                        <option value="player">Individual Call-Sign</option>
+                      </select>
+                    </div>
+
+                    {announcementTargetType !== 'all' && (
+                      <div>
+                        <label className="block text-[10px] uppercase text-muted-foreground mb-1 font-bold">
+                          {announcementTargetType === 'stage'
+                            ? 'Stage Number (1–7)'
+                            : announcementTargetType === 'team'
+                            ? 'Team Designation'
+                            : 'Operative Call-Sign'}
+                        </label>
+                        <input
+                          type="text"
+                          value={announcementTargetValue}
+                          onChange={(e) => setAnnouncementTargetValue(e.target.value)}
+                          placeholder={
+                            announcementTargetType === 'stage'
+                              ? 'e.g. 2'
+                              : announcementTargetType === 'team'
+                              ? 'e.g. Nightstalkers'
+                              : 'e.g. Cipher_Echo'
+                          }
+                          className="w-full bg-[#0c0c0b] border border-border p-2 text-xs text-foreground focus:outline-none focus:border-crimson"
+                          required
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase text-muted-foreground mb-1 font-bold">
+                      Announcement Text *
+                    </label>
+                    <textarea
+                      value={announcementMessage}
+                      onChange={(e) => setAnnouncementMessage(e.target.value)}
+                      placeholder="Enter authoritative bulletin text..."
+                      rows={5}
+                      className="w-full bg-[#0c0c0b] border border-border p-2.5 text-xs text-foreground focus:outline-none focus:border-crimson font-serif"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="annPinned"
+                      checked={announcementPinned}
+                      onChange={(e) => setAnnouncementPinned(e.target.checked)}
+                      className="accent-crimson cursor-pointer"
+                    />
+                    <label htmlFor="annPinned" className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1">
+                      <Pin size={11} className={announcementPinned ? 'text-amber-400' : ''} />
+                      <span>Pin this bulletin to the top of investigator notice feeds</span>
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="submit"
+                      disabled={isPostingAnnouncement || !announcementTitle.trim() || !announcementMessage.trim()}
+                      className="button button-primary text-xs font-mono font-bold py-2 px-5 flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Send size={13} />
+                      <span>{isPostingAnnouncement ? 'Broadcasting...' : 'Publish Announcement'}</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Right Feed (7 cols) */}
+              <div className="lg:col-span-7 panel p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-border pb-2.5">
+                  <span className="font-bold text-foreground uppercase tracking-wider">
+                    Published Announcements ({announcements.length})
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">ACTIVE PUBLIC BROADCASTS</span>
+                </div>
+
+                {announcements.length === 0 ? (
+                  <p className="font-serif text-xs text-muted-foreground text-center py-8">
+                    No active announcements found. Post a bulletin using the composer to transmit instructions to all operatives.
+                  </p>
+                ) : (
+                  <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                    {announcements.map((ann) => (
+                      <div
+                        key={ann.id}
+                        className={`p-3.5 border transition-all ${
+                          ann.pinned
+                            ? 'border-amber-500/50 bg-[#16140e]'
+                            : 'border-border bg-[#10100f]'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {ann.pinned && (
+                                <span className="text-[9px] bg-amber-950/80 border border-amber-500/70 text-amber-300 px-1.5 py-0.2 flex items-center gap-1 font-bold">
+                                  <Pin size={10} /> PINNED
+                                </span>
+                              )}
+                              <h4 className="font-serif text-sm font-semibold text-foreground m-0">
+                                {ann.title}
+                              </h4>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">
+                              <span>By: {ann.createdBy}</span>
+                              <span>·</span>
+                              <span>
+                                Target:{' '}
+                                <strong className="text-foreground uppercase">
+                                  {ann.targetType === 'all'
+                                    ? 'All Operatives'
+                                    : `${ann.targetType}: ${ann.targetValue}`}
+                                </strong>
+                              </span>
+                              <span>·</span>
+                              <span>{new Date(ann.createdAt).toLocaleString()}</span>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={async () => {
+                              if (confirm(`Expunge announcement "${ann.title}"?`)) {
+                                const ok = await deleteStaffAnnouncement(staffToken, ann.id);
+                                if (ok) {
+                                  showFeedback('Announcement retracted.');
+                                  reloadCommunications();
+                                }
+                              }
+                            }}
+                            className="text-muted-foreground hover:text-crimson p-1 transition-colors"
+                            title="Delete / Expunge Announcement"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+
+                        <p className="font-serif text-xs text-[#dcd6c9] mt-2.5 mb-0 leading-relaxed whitespace-pre-wrap">
+                          {ann.message}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SUB-VIEW 2: DIRECT INVESTIGATOR DESK (2-WAY) */}
+          {commSubTab === 'conversations' && (
+            <div className="grid gap-6 lg:grid-cols-12 min-h-[550px]">
+              {/* Left: Conversation Threads List (5 cols) */}
+              <div className="lg:col-span-5 panel p-4 space-y-3 flex flex-col">
+                <div className="flex items-center justify-between border-b border-border pb-2.5">
+                  <span className="font-bold text-foreground uppercase tracking-wider text-xs">
+                    Investigator Inquiries ({conversations.length})
+                  </span>
+                  <div className="flex items-center gap-1 text-[10px]">
+                    {(['all', 'open', 'resolved'] as const).map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => setConvStatusFilter(st)}
+                        className={`px-2 py-0.5 uppercase ${
+                          convStatusFilter === st
+                            ? 'bg-crimson text-white font-bold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Search */}
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-2.5 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={convSearch}
+                    onChange={(e) => setConvSearch(e.target.value)}
+                    placeholder="Search by call-sign or name..."
+                    className="w-full bg-[#0c0c0b] border border-border pl-8 pr-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-crimson font-mono"
+                  />
+                </div>
+
+                {/* Conversation List */}
+                <div className="space-y-2 flex-1 overflow-y-auto max-h-[500px] pr-1">
+                  {conversations
+                    .filter((c) => {
+                      const matchesStatus = convStatusFilter === 'all' || c.status === convStatusFilter;
+                      const q = convSearch.toLowerCase().trim();
+                      const matchesQuery =
+                        !q ||
+                        c.playerCallSign.toLowerCase().includes(q) ||
+                        c.playerName.toLowerCase().includes(q);
+                      return matchesStatus && matchesQuery;
+                    })
+                    .map((conv) => {
+                      const isSelected = selectedConvId === conv.id;
+                      const hasUnread = conv.unreadStaffCount > 0;
+
+                      return (
+                        <div
+                          key={conv.id}
+                          onClick={() => setSelectedConvId(conv.id)}
+                          className={`p-3 border transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-crimson bg-[#181212]'
+                              : hasUnread
+                              ? 'border-crimson/60 bg-[#140f0f]'
+                              : 'border-border bg-[#0f0f0e] hover:bg-[#141413]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-1.5">
+                              {hasUnread && (
+                                <span className="size-2 rounded-full bg-crimson animate-pulse" />
+                              )}
+                              <strong className="text-foreground font-mono text-xs">
+                                {conv.playerCallSign}
+                              </strong>
+                              {conv.playerStudentClass && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  ({conv.playerStudentClass})
+                                </span>
+                              )}
+                            </div>
+                            <span
+                              className={`text-[9px] px-1.5 py-0.2 uppercase font-bold border ${
+                                conv.status === 'open'
+                                  ? 'border-emerald-600/70 text-emerald-400 bg-emerald-950/40'
+                                  : 'border-border text-muted-foreground bg-[#141413]'
+                              }`}
+                            >
+                              {conv.status}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] text-[#beb8ad] font-serif truncate">
+                            {conv.lastMessage || 'No messages yet'}
+                          </div>
+
+                          <div className="flex justify-between items-center text-[9px] text-muted-foreground mt-1 pt-1 border-t border-[#1b1a18]">
+                            <span>{conv.playerName}</span>
+                            <span>{new Date(conv.lastMessageAt).toLocaleTimeString()}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                  {conversations.length === 0 && (
+                    <p className="font-serif text-xs text-muted-foreground text-center py-6">
+                      No private investigator conversations initiated yet. Messages sent by players from their dashboard will appear here.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Message Transcript & Reply (7 cols) */}
+              <div className="lg:col-span-7 panel p-5 flex flex-col justify-between space-y-4">
+                {selectedConvId ? (
+                  (() => {
+                    const conv = conversations.find((c) => c.id === selectedConvId);
+                    if (!conv) return null;
+
+                    return (
+                      <>
+                        {/* Conversation Header */}
+                        <div className="flex items-center justify-between border-b border-border pb-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-base text-foreground font-mono">
+                                {conv.playerCallSign}
+                              </span>
+                              <span className="text-muted-foreground text-xs">
+                                · {conv.playerName}
+                              </span>
+                              {conv.playerStudentClass && (
+                                <span className="text-[10px] border border-border px-1.5 py-0.2 text-muted-foreground">
+                                  {conv.playerStudentClass}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground block mt-0.5">
+                              Status: <strong className="text-foreground uppercase">{conv.status}</strong> · Started {new Date(conv.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={async () => {
+                                const nextStatus = conv.status === 'open' ? 'resolved' : 'open';
+                                const ok = await updateConversationStatus(staffToken, conv.id, nextStatus);
+                                if (ok) {
+                                  showFeedback(`Conversation marked as ${nextStatus}.`);
+                                  reloadCommunications();
+                                }
+                              }}
+                              className={`button text-xs py-1 px-3 font-mono flex items-center gap-1 ${
+                                conv.status === 'open'
+                                  ? 'button-secondary text-emerald-400'
+                                  : 'button-secondary text-amber-400'
+                              }`}
+                            >
+                              <CheckCircle2 size={12} />
+                              <span>{conv.status === 'open' ? 'Mark Resolved' : 'Reopen Thread'}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Scrollable Message Transcript */}
+                        <div className="flex-1 overflow-y-auto space-y-3 p-3 bg-[#0a0a09] border border-border max-h-[380px] min-h-[260px]">
+                          {isLoadingMessages ? (
+                            <p className="font-mono text-xs text-muted-foreground text-center py-6">
+                              Loading message history...
+                            </p>
+                          ) : convMessages.length === 0 ? (
+                            <p className="font-serif text-xs text-muted-foreground text-center py-6">
+                              No messages logged in this docket.
+                            </p>
+                          ) : (
+                            convMessages.map((msg) => {
+                              const isStaff = msg.senderType === 'staff';
+                              return (
+                                <div
+                                  key={msg.id}
+                                  className={`flex flex-col ${isStaff ? 'items-end' : 'items-start'}`}
+                                >
+                                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
+                                    <span className={isStaff ? 'text-amber-400 font-bold' : 'text-crimson font-bold'}>
+                                      {msg.senderName} ({isStaff ? 'Staff' : 'Player'})
+                                    </span>
+                                    <span>·</span>
+                                    <span>{new Date(msg.createdAt).toLocaleTimeString()}</span>
+                                  </div>
+                                  <div
+                                    className={`max-w-[85%] p-3 border font-serif text-xs leading-relaxed ${
+                                      isStaff
+                                        ? 'bg-[#1a170e] border-[#4a3a1f] text-[#f2e6cb]'
+                                        : 'bg-[#140e0e] border-[#401f1f] text-[#ecd9d9]'
+                                    }`}
+                                  >
+                                    <p className="m-0 whitespace-pre-wrap">{msg.message}</p>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {/* Reply Composer */}
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!staffReplyText.trim()) return;
+                            setIsSendingReply(true);
+                            try {
+                              const res = await sendStaffMessage(staffToken, conv.id, staffReplyText.trim());
+                              if (res.success && res.message) {
+                                setConvMessages((prev) => [...prev, res.message!]);
+                                setStaffReplyText('');
+                                reloadCommunications();
+                              } else {
+                                showFeedback(res.error || 'Failed to transmit reply.');
+                              }
+                            } catch {
+                              showFeedback('Network transmission error.');
+                            } finally {
+                              setIsSendingReply(false);
+                            }
+                          }}
+                          className="space-y-2 pt-2 border-t border-border"
+                        >
+                          <textarea
+                            value={staffReplyText}
+                            onChange={(e) => setStaffReplyText(e.target.value)}
+                            placeholder="Type official staff response to this investigator..."
+                            rows={3}
+                            className="w-full bg-[#0c0c0b] border border-border p-2.5 text-xs text-foreground focus:outline-none focus:border-crimson font-serif"
+                            required
+                          />
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-muted-foreground">
+                              Transmitted directly to operative's dashboard alert wire.
+                            </span>
+                            <button
+                              type="submit"
+                              disabled={isSendingReply || !staffReplyText.trim()}
+                              className="button button-primary text-xs font-mono font-bold py-1.5 px-4 flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Send size={12} />
+                              <span>{isSendingReply ? 'Transmitting...' : 'Send Response'}</span>
+                            </button>
+                          </div>
+                        </form>
+                      </>
+                    );
+                  })()
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-muted-foreground">
+                    <MessageSquare size={32} className="text-muted-foreground/40 mb-3" />
+                    <p className="font-serif text-sm">Select an investigator docket from the left to inspect the message transcript and transmit replies.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -1,28 +1,5 @@
 [
   {
-    "id": "TEAM-91FDD19D",
-    "name": "Cipher Vanguard",
-    "inviteCode": "TLS-A298EC",
-    "createdBy": "inv_alice",
-    "createdAt": "2026-11-05T05:05:41.244Z",
-    "maxSize": 5,
-    "retired": false,
-    "members": [
-      {
-        "callSign": "inv_alice",
-        "fullName": "Alice Vance",
-        "joinedAt": "2026-11-05T05:05:41.244Z",
-        "isCreator": true
-      },
-      {
-        "callSign": "inv_bob",
-        "fullName": "Bob Miller",
-        "joinedAt": "2026-11-05T05:05:41.260Z",
-        "isCreator": false
-      }
-    ]
-  },
-  {
     "id": "TEAM-67AD7F82",
     "name": "Zodiac Watchers",
     "inviteCode": "TLS-45D946",

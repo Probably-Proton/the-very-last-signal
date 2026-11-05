@@ -41,12 +41,14 @@ import {
   MoreHorizontal,
   Newspaper,
   Pause,
+  Pin,
   Play,
   Plus,
   Radio,
   RefreshCw,
   RotateCcw,
   Search,
+  Send,
   Settings,
   ShieldAlert,
   SlidersHorizontal,
@@ -105,12 +107,23 @@ import {
   GAME_LAUNCH_IST,
   isRegistrationOpen,
   isGameLaunched,
+  isStageAccessible,
   calculateStageScore,
   formatCountdown,
   formatToIST,
   getRemainingTime,
   getStageDisplayInfo,
 } from '@/src/lib/stageConfig';
+
+import {
+  fetchPlayerAnnouncements,
+  fetchPlayerConversation,
+  sendPlayerMessage,
+  markPlayerMessagesRead,
+  type StaffAnnouncement,
+  type StaffConversation,
+  type ConversationMessage,
+} from '@/src/lib/communicationsService';
 
 import { PreRegistrationView } from '@/src/components/PreRegistrationView';
 import { GameLaunchScreen } from '@/src/components/GameLaunchScreen';
@@ -176,22 +189,36 @@ type RouteView =
   | 'first-directive'
   | 'case-files';
 
-function getRoute(): { view: RouteView; id?: string } {
+export interface AppRoute {
+  view: RouteView;
+  id?: string;
+  doc?: string;
+  collection?: 'directive' | 'archival';
+  standalone?: boolean;
+}
+
+function getRoute(): AppRoute {
   const parts = window.location.pathname.split('/').filter(Boolean);
+  const searchParams = new URLSearchParams(window.location.search);
+  const doc = searchParams.get('doc') || undefined;
+  const colParam = searchParams.get('collection');
+  const collection = (colParam === 'archival' || colParam === 'directive') ? colParam : undefined;
+  const standalone = searchParams.get('standalone') === 'true';
+
   if (parts[0] === 'evidence' && parts[1]) {
-    return { view: 'viewer', id: parts[1] };
+    return { view: 'viewer', id: parts[1], doc, collection, standalone };
   }
   if (parts[0] === 'suspect-database') {
-    return { view: 'suspects' };
+    return { view: 'suspects', doc, collection, standalone };
   }
   if (parts[0] === 'first-directive' || parts[0] === 'case-files' || parts[0] === 'dossiers') {
-    return { view: 'first-directive' };
+    return { view: 'first-directive', doc, collection, standalone };
   }
   if (parts[0] === 'support' || parts[0] === 'tickets' || parts[0] === 'help') {
-    return { view: 'support' };
+    return { view: 'support', doc, collection, standalone };
   }
   if (parts[0] === 'terminal' || parts[0] === 'launch' || parts[0] === 'launch-terminal') {
-    return { view: 'terminal' };
+    return { view: 'terminal', doc, collection, standalone };
   }
   const route = parts[0] as RouteView | undefined;
   const known: RouteView[] = [
@@ -214,10 +241,15 @@ function getRoute(): { view: RouteView; id?: string } {
     'first-directive',
     'case-files',
   ];
-  return { view: known.includes(route as RouteView) ? (route as RouteView) : 'landing' };
+  return {
+    view: known.includes(route as RouteView) ? (route as RouteView) : 'landing',
+    doc,
+    collection,
+    standalone,
+  };
 }
 
-function computeLocationProfile(r: { view: RouteView; id?: string }): import('@/src/lib/tacticalAudio').AudioLocationProfile {
+function computeLocationProfile(r: AppRoute): import('@/src/lib/tacticalAudio').AudioLocationProfile {
   if (r.view === 'landing' || r.view === 'login' || r.view === 'register') return 'silent';
   if (r.view === 'terminal') return 'audio_investigation';
   if (r.view === 'dashboard' || r.view === 'progress' || r.view === 'leaderboard' || r.view === 'account' || r.view === 'team' || r.view === 'support') return 'dashboard';
@@ -509,7 +541,21 @@ export default function App() {
     }
   }
 
-
+  // Standalone Fullscreen Document Viewer (opened via "Open in Separate Page")
+  if (route.standalone && (route.view === 'first-directive' || route.view === 'case-files')) {
+    return (
+      <div className="min-h-screen bg-[#090b09] text-[#ebe6dc]">
+        <ClassifiedCaseFilesViewer
+          initialDocId={route.doc}
+          initialCollection={route.collection}
+          isStandalonePage={true}
+          onReturnToDirective={() => {
+            navigate('/first-directive');
+          }}
+        />
+      </div>
+    );
+  }
 
   // Authenticated Shell
   return (
@@ -784,7 +830,7 @@ function Sidebar({
             }}
           >
             <FolderOpen size={16} className={current === 'first-directive' ? 'text-emerald-400' : 'text-muted-foreground'} />
-            <span>First Directive (5 Files)</span>
+            <span>First Directive (6 Files)</span>
             <span className="ml-auto font-mono text-[9px] text-[#8deb9e] border border-[#2e5237] bg-[#122116] px-1.5 py-0.5">
               DOSSIERS
             </span>
@@ -870,7 +916,7 @@ function PageDispatcher({
   onLogout,
   onTriggerDirectorReplay,
 }: {
-  route: { view: RouteView; id?: string };
+  route: AppRoute;
   user: PrototypeUser;
   progress: UserProgress;
   onUpdateProgress: (updater: (prev: UserProgress) => UserProgress) => void;
@@ -899,9 +945,56 @@ function PageDispatcher({
           onUpdateProgress={onUpdateProgress}
         />
       );
-    case 'map':
+    case 'map': {
+      const isStage3Open = isStageAccessible(3, progress.stagesCompleted, new Date(), Boolean(progress.hasStageOverride));
+      if (!isStage3Open && !progress.mapGateUnlocked) {
+        return (
+          <div className="space-y-6 my-6">
+            <PageHeader
+              eyebrow="Investigation / Archival Triangulation"
+              title="Cartographic Survey Map"
+              description="Fictional regional investigation map: Northern California / San Francisco Bay Area."
+            />
+            <div className="panel border-2 border-crimson bg-[#140b0b] p-8 text-center max-w-2xl mx-auto space-y-4 shadow-2xl">
+              <Lock size={36} className="text-crimson mx-auto" />
+              <h2 className="font-serif text-2xl font-light text-foreground">Sector 03 Cartography Sealed</h2>
+              <p className="font-mono text-xs text-muted-foreground leading-relaxed">
+                Cartographic map files are restricted under archival protocols.
+                Access requires completion of preceding stage investigations and arrival of the scheduled release timetable.
+              </p>
+              <button className="button button-primary text-xs font-mono" onClick={() => navigate('/dashboard')}>
+                Return to Dashboard
+              </button>
+            </div>
+          </div>
+        );
+      }
       return <SignalMapView progress={progress} onUpdateProgress={onUpdateProgress} />;
-    case 'suspects':
+    }
+    case 'suspects': {
+      const isStage5Open = isStageAccessible(5, progress.stagesCompleted, new Date(), Boolean(progress.hasStageOverride));
+      if (!isStage5Open && !progress.suspectDbUnlocked) {
+        return (
+          <div className="space-y-6 my-6">
+            <PageHeader
+              eyebrow="Department of Investigation // Classified Records"
+              title="Suspect & Person of Interest Database"
+              description="Restricted archival intelligence repository."
+            />
+            <div className="panel border-2 border-crimson bg-[#140b0b] p-8 text-center max-w-2xl mx-auto space-y-4 shadow-2xl">
+              <Lock size={36} className="text-crimson mx-auto" />
+              <h2 className="font-serif text-2xl font-light text-foreground">Sector 05 Dossier Vault Sealed</h2>
+              <p className="font-mono text-xs text-muted-foreground leading-relaxed">
+                Suspect dossiers are sealed under chain-of-custody protocols.
+                Access requires completion of preceding stage investigations and arrival of the scheduled release timetable.
+              </p>
+              <button className="button button-primary text-xs font-mono" onClick={() => navigate('/dashboard')}>
+                Return to Dashboard
+              </button>
+            </div>
+          </div>
+        );
+      }
       return (
         <SuspectDatabaseView
           progress={progress}
@@ -909,7 +1002,30 @@ function PageDispatcher({
           onNavigateEvidence={(id) => navigate(`/evidence/${id}`)}
         />
       );
-    case 'debrief':
+    }
+    case 'debrief': {
+      const isStage7Open = isStageAccessible(7, progress.stagesCompleted, new Date(), Boolean(progress.hasStageOverride));
+      if (!isStage7Open && progress.stagesCompleted < 6) {
+        return (
+          <div className="space-y-6 my-6">
+            <PageHeader
+              eyebrow="Investigation / Official Closure"
+              title="Case Debrief & Certificate"
+              description="Official case closure and debrief."
+            />
+            <div className="panel border-2 border-crimson bg-[#140b0b] p-8 text-center max-w-2xl mx-auto space-y-4 shadow-2xl">
+              <Lock size={36} className="text-crimson mx-auto" />
+              <h2 className="font-serif text-2xl font-light text-foreground">Debrief Records Sealed</h2>
+              <p className="font-mono text-xs text-muted-foreground leading-relaxed">
+                The Stage 07 Debrief & Closing Chronicle are restricted until all preliminary case investigations are completed.
+              </p>
+              <button className="button button-primary text-xs font-mono" onClick={() => navigate('/dashboard')}>
+                Return to Dashboard
+              </button>
+            </div>
+          </div>
+        );
+      }
       return (
         <DebriefView
           user={user}
@@ -918,11 +1034,13 @@ function PageDispatcher({
           onNavigateHome={() => navigate('/dashboard')}
         />
       );
+    }
     case 'support':
       return <SupportTicketsView user={user} onNavigateHome={() => navigate('/dashboard')} />;
     case 'messages':
       return (
         <MessagesView
+          user={user}
           progress={progress}
           onUpdateProgress={onUpdateProgress}
           onTriggerDirectorReplay={onTriggerDirectorReplay}
@@ -957,6 +1075,8 @@ function PageDispatcher({
     case 'case-files':
       return (
         <ClassifiedCaseFilesViewer
+          initialDocId={route.doc}
+          initialCollection={route.collection}
           onReturnToDirective={() => navigate('/dashboard')}
         />
       );
@@ -1778,21 +1898,11 @@ function InvestigationView({
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center shrink-0">
             <button
               onClick={() => navigate('/evidence')}
-              className="button button-primary flex items-center justify-center gap-2 py-3 px-5 text-xs font-mono tracking-wider shadow-lg"
+              className="button button-primary flex items-center justify-center gap-2 py-3 px-6 text-xs font-mono tracking-wider shadow-lg"
             >
               <FolderOpen size={15} />
               OPEN EVIDENCE ROOM
             </button>
-            {isStage1Active && (
-              <button
-                onClick={() => navigate('/evidence/EV-0103')}
-                className="button button-secondary flex items-center justify-center gap-2 py-3 px-4 text-xs font-mono text-[#dcd6c9]"
-                title="Direct link to primary Stage 1 cipher puzzle"
-              >
-                <FileText size={15} />
-                Inspect EV-0103 Directly
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -2021,12 +2131,11 @@ function EvidenceRoomView({ progress }: { progress: UserProgress }) {
       <div className="evidence-card-grid">
         {filtered.map((item) => {
           // Items with status 'available', unlocked by stage, or accessible via verified stage override
+          const itemStage = item.stage ?? 1;
           const isItemUnlocked =
             Boolean(progress.hasStageOverride) ||
-            (isGameLaunched() && (
-              progress.unlockedEvidenceIds.includes(item.id) ||
-              (item.stage !== undefined && item.stage <= progress.activeStage)
-            ));
+            (isStageAccessible(itemStage, progress.stagesCompleted, new Date(), false) &&
+              (progress.unlockedEvidenceIds.includes(item.id) || itemStage <= progress.stagesCompleted + 1));
 
           return (
             <div
@@ -2207,12 +2316,11 @@ function EvidenceViewerView({
   }
 
   // Locked Evidence State - Protect contents from leaking
+  const itemStage = item.stage ?? 1;
   const isItemUnlocked =
     Boolean(progress.hasStageOverride) ||
-    (isGameLaunched() && (
-      progress.unlockedEvidenceIds.includes(item.id) ||
-      (item.stage !== undefined && item.stage <= progress.activeStage)
-    ));
+    (isStageAccessible(itemStage, progress.stagesCompleted, new Date(), false) &&
+      (progress.unlockedEvidenceIds.includes(item.id) || itemStage <= progress.stagesCompleted + 1));
 
   if (!isItemUnlocked) {
     const directive = getInvestigatorDirective(progress);
@@ -2600,69 +2708,58 @@ function TeletypeTerminalModal({
     isCleared ? 'success' : 'idle'
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isProcessing) return;
+
+    const trimmedDir = directoryInput.trim();
+    const trimmedKey = passwordInput.trim();
+    if (!trimmedDir || !trimmedKey) return;
 
     setIsProcessing(true);
     setTerminalOutput((prev) => [
       ...prev,
-      `> SUBMIT AUTH: [DIR: ${directoryInput.trim()}] [KEY: ******]`,
-      '> VALIDATING SHA-256 SECTOR PARITY...',
+      `> SUBMIT AUTH: [SECTOR CREDENTIALS TRANSMITTED]`,
+      '> VALIDATING CRYPTOGRAPHIC SECTOR PARITY WITH SERVER...',
     ]);
 
-    setTimeout(() => {
-      // Normalize inputs: remove whitespace, hyphens, and make lowercase
-      const cleanDir = directoryInput.trim().toLowerCase().replace(/[\s_-]+/g, '');
-      const cleanKey = passwordInput.trim().toLowerCase().replace(/[\s_-]+/g, '');
+    try {
+      const result = await submitChallengeAnswer({
+        callSign: progress.callSign,
+        challengeKey: 'gate_zk_login',
+        answer: trimmedKey,
+        username: trimmedDir,
+        currentProgress: progress,
+      });
 
-      // Accepted directory formats: zkcase, zcase, zk, zkcase17
-      const isDirValid = cleanDir === 'zkcase' || cleanDir === 'zk' || cleanDir === 'zcase' || cleanDir === 'zkcase17';
-      // Accepted password formats: case17, 17
-      const isKeyValid = cleanKey === 'case17' || cleanKey === '17';
-
-      if (isDirValid && isKeyValid) {
-        // Genuine success validation only
+      if (result.success && (result.status === 'correct' || result.status === 'already_solved')) {
         tacticalAudio.playSuccess();
         setSolveState('success');
+        const nowIso = new Date().toISOString();
+        const scoreBreakdown = calculateStageScore(1, nowIso);
+        const awardedPoints = result.pointsEarned ?? scoreBreakdown.totalScore;
+
         setTerminalOutput((prev) => [
           ...prev,
-          '[AUTH CONFIRMED] // CHECKSUM 0x9AF4 PASSED',
-          '> DIRECTORY RESOLVED & VERIFIED [ARCHIVAL B]',
+          '[AUTH CONFIRMED] // REGISTRY CHECKSUM PASSED',
           '> MASTER KEY ACCEPTED',
           '-------------------------------------------------------',
           '[CLEARANCE GRANTED] STAGE 01 CLEARED // STAGE 02 UNLOCKED',
           '> NEW FILE ACCESSIBLE: EV-0201 (Records Room — Lower Level)',
-          'TELETYPE SESSION ACTIVE. READY FOR STAGE 02 INVESTIGATION.',
+          `> AWARDED: +${awardedPoints} MERIT POINTS`,
+          scoreBreakdown.scoringEligible
+            ? `(100 Base + ${scoreBreakdown.hourlyBonus} Hourly Speed Bonus)`
+            : '(Late solve: 0 competitive points awarded)',
         ]);
 
-        submitChallengeAnswer({
-          callSign: 'operative',
-          challengeKey: 'gate_zk_login',
-          answer: cleanKey,
-          username: cleanDir,
-          currentProgress: progress,
-        }).catch((err) => console.warn('Submit challenge background sync:', err));
-
         if (onUpdateProgress) {
-          const nowIso = new Date().toISOString();
-          const scoreBreakdown = calculateStageScore(1, nowIso);
-
-          setTerminalOutput((prev) => [
-            ...prev,
-            `> AWARDED: +${scoreBreakdown.totalScore} MERIT POINTS`,
-            scoreBreakdown.scoringEligible
-              ? `(100 Base + ${scoreBreakdown.hourlyBonus} Hourly Speed Bonus)`
-              : '(Late solve: 0 competitive points awarded)',
-          ]);
-
           onUpdateProgress((prev) => {
             const nextActive = Math.max(prev.activeStage, 2);
             const nextCompleted = Math.max(prev.stagesCompleted, 1);
-            const nextUnlocked = Array.from(new Set([...prev.unlockedEvidenceIds, 'EV-0201']));
+            const nextUnlocked = Array.from(new Set([...prev.unlockedEvidenceIds, 'EV-0201', 'EV-0202', 'EV-0203', 'EV-0204']));
             const nextScores = {
               ...prev.stageScores,
-              1: scoreBreakdown.totalScore,
+              1: awardedPoints,
             };
             const totalScore = Object.values(nextScores).reduce((a, b) => a + b, 0);
 
@@ -2687,19 +2784,25 @@ function TeletypeTerminalModal({
           });
         }
       } else {
-        // Genuine rejected submission: play subtle error tone, NEVER leak plaintext solution
         tacticalAudio.playError();
         setSolveState('failure');
         setTerminalOutput((prev) => [
           ...prev,
           '[ACCESS DENIED] // 403 REJECTED: CHECKSUM MISMATCH',
-          'ERROR: Credentials do not match the archival registry.',
-          'Inspect the six-line memorandum note affixed to EV-0103 to recover the required sequence.',
-          'Remember: Read the vertical margin boundaries sequentially.',
+          result.message || 'ERROR: Credentials rejected by archival registry.',
         ]);
       }
+    } catch {
+      tacticalAudio.playError();
+      setSolveState('failure');
+      setTerminalOutput((prev) => [
+        ...prev,
+        '[ACCESS DENIED] // 500 SERVER VALIDATION ERROR',
+        'ERROR: Unable to contact archival authorization server. Please retry.',
+      ]);
+    } finally {
       setIsProcessing(false);
-    }, 600);
+    }
   };
 
   return (
@@ -3617,7 +3720,6 @@ function SignalMapView({
       ],
       associatedEvidence: [
         { id: 'CAS-017', title: 'Witness Testimony — Case File 017' },
-        { id: 'EV-0401', title: 'Recovered Audio Cassette' },
       ],
     },
   ];
@@ -4347,18 +4449,101 @@ function SignalMapView({
 }
 
 /* =========================================================================
-   9. MESSAGES
+   9. MESSAGES & COMMUNICATIONS HUB
    ========================================================================= */
 
 function MessagesView({
+  user,
   progress,
   onUpdateProgress,
   onTriggerDirectorReplay,
 }: {
+  user?: PrototypeUser;
   progress?: UserProgress;
   onUpdateProgress?: (updater: (prev: UserProgress) => UserProgress) => void;
   onTriggerDirectorReplay?: () => void;
 }) {
+  const [activeCommsTab, setActiveCommsTab] = useState<'directives' | 'archival'>('directives');
+
+  // Announcements State
+  const [announcements, setAnnouncements] = useState<StaffAnnouncement[]>([]);
+  const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState(false);
+
+  // Direct Player-Staff Desk Conversation State
+  const [playerConversation, setPlayerConversation] = useState<StaffConversation | null>(null);
+  const [playerMessages, setPlayerMessages] = useState<ConversationMessage[]>([]);
+  const [playerInputMessage, setPlayerInputMessage] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [commsFeedback, setCommsFeedback] = useState<string | null>(null);
+
+  const activeCallSign = user?.callSign || progress?.callSign || '';
+  const activeFullName = user?.fullName || activeCallSign;
+  const activeClass = user?.studentClass || '';
+
+  // Load announcements and active player conversation
+  const loadCommunicationsData = async () => {
+    if (!activeCallSign) return;
+    try {
+      const [anns, convData] = await Promise.all([
+        fetchPlayerAnnouncements({
+          callSign: activeCallSign,
+          stage: progress?.activeStage,
+          teamName: progress?.teamName,
+        }),
+        fetchPlayerConversation(activeCallSign),
+      ]);
+      setAnnouncements(anns);
+      setPlayerConversation(convData.conversation);
+      setPlayerMessages(convData.messages);
+
+      // Auto-mark read on view
+      if (convData.messages.some((m) => !m.readByPlayer && m.senderType === 'staff')) {
+        markPlayerMessagesRead(activeCallSign);
+      }
+    } catch (err) {
+      console.warn('[MessagesView] Failed loading player communications:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadCommunicationsData();
+    const interval = setInterval(loadCommunicationsData, 12000);
+    return () => clearInterval(interval);
+  }, [activeCallSign, progress?.activeStage, progress?.teamName]);
+
+  // Handle player sending message to staff desk
+  const handleSendMessageToStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!playerInputMessage.trim() || !activeCallSign) return;
+    setIsSendingMessage(true);
+    tacticalAudio.playButtonClick();
+
+    try {
+      const res = await sendPlayerMessage({
+        callSign: activeCallSign,
+        fullName: activeFullName,
+        studentClass: activeClass,
+        message: playerInputMessage.trim(),
+      });
+
+      if (res.success && res.message) {
+        setPlayerMessages((prev) => [...prev, res.message!]);
+        setPlayerInputMessage('');
+        tacticalAudio.playSuccess();
+        setCommsFeedback('Message transmitted directly to Headquarters Staff Desk.');
+        setTimeout(() => setCommsFeedback(null), 4000);
+        loadCommunicationsData();
+      } else {
+        setCommsFeedback(res.error || 'Failed to transmit message.');
+      }
+    } catch {
+      setCommsFeedback('Network transmission failure.');
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
+  // Archival Messages
   const deliveredMessages = useMemo(() => {
     return progress ? getDeliveredMessagesForPlayer(progress) : [];
   }, [progress]);
@@ -4390,9 +4575,9 @@ function MessagesView({
   return (
     <>
       <PageHeader
-        eyebrow="Communications / Radio Dispatch Archive"
-        title="Incoming Transmissions"
-        description="Encrypted wires, stage broadcasts, and one-way signals received from the Director, the mystery caller, and system monitors."
+        eyebrow="Communications / Radio Dispatch &amp; Operations Wire"
+        title="Communications &amp; Staff Desk"
+        description="Official headquarters bulletins, direct bilateral communications with investigation staff, and historical archival radio intercepts."
         action={
           <div className="flex flex-wrap items-center gap-2">
             {unreadCount > 0 && onUpdateProgress && (
@@ -4401,7 +4586,7 @@ function MessagesView({
                 className="button button-secondary text-xs font-mono py-1.5 px-3 flex items-center gap-1.5"
               >
                 <Check size={13} className="text-emerald-400" />
-                <span>Mark All Read ({unreadCount})</span>
+                <span>Mark Radio Dispatches Read ({unreadCount})</span>
               </button>
             )}
             {onTriggerDirectorReplay && (
@@ -4420,122 +4605,326 @@ function MessagesView({
         }
       />
 
-      <div className="grid gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
-          {deliveredMessages.map((m) => {
-            const isRead = readSet.has(m.id);
+      {/* Communications Channel Tab Selector */}
+      <div className="flex flex-wrap gap-2 border-b border-border pb-3 mb-6 text-xs font-mono">
+        <button
+          onClick={() => {
+            tacticalAudio.playButtonClick();
+            setActiveCommsTab('directives');
+          }}
+          className={`flex items-center gap-2 px-3 py-2 transition-colors border ${
+            activeCommsTab === 'directives'
+              ? 'border-crimson bg-[#181212] text-foreground font-semibold'
+              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-[#141413]'
+          }`}
+        >
+          <Bell size={14} className={activeCommsTab === 'directives' ? 'text-crimson' : 'text-muted-foreground'} />
+          <span>Official Directives &amp; Staff Desk</span>
+          {announcements.length > 0 && (
+            <span className="font-mono text-[10px] px-1.5 py-0.2 bg-[#2a1313] text-crimson border border-crimson/50">
+              {announcements.length}
+            </span>
+          )}
+        </button>
 
-            return (
-              <div
-                key={m.id}
-                onClick={() => handleMarkSingleRead(m.id)}
-                className={`panel transition-all cursor-pointer ${
-                  !isRead ? 'ring-1 ring-crimson/50 shadow-[0_0_15px_rgba(200,40,40,0.15)]' : ''
-                } ${
-                  m.tone === 'antagonist'
-                    ? 'border-[#5c2420] bg-[#1a0e0e]'
-                    : m.tone === 'director'
-                    ? 'border-[#2d3a31] bg-[#111713]'
-                    : m.tone === 'staff'
-                    ? 'border-[#544320] bg-[#1a170e]'
-                    : 'border-border bg-[#141514]'
-                }`}
-              >
-                <div className="flex items-center justify-between font-mono text-xs uppercase tracking-wider mb-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {!isRead && (
-                      <span
-                        className="size-2 rounded-full bg-crimson animate-pulse inline-block"
-                        title="Unread dispatch"
-                      />
-                    )}
-                    <span
-                      className={
-                        m.tone === 'antagonist'
-                          ? 'text-crimson font-bold'
-                          : m.tone === 'director'
-                          ? 'text-[#8bb393] font-bold'
-                          : m.tone === 'staff'
-                          ? 'text-amber-400 font-bold'
-                          : 'text-muted-foreground'
-                      }
+        <button
+          onClick={() => {
+            tacticalAudio.playButtonClick();
+            setActiveCommsTab('archival');
+          }}
+          className={`flex items-center gap-2 px-3 py-2 transition-colors border ${
+            activeCommsTab === 'archival'
+              ? 'border-crimson bg-[#181212] text-foreground font-semibold'
+              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-[#141413]'
+          }`}
+        >
+          <Radio size={14} className={activeCommsTab === 'archival' ? 'text-crimson' : 'text-muted-foreground'} />
+          <span>Archival Radio Intercepts ({deliveredMessages.length})</span>
+          {unreadCount > 0 && (
+            <span className="font-mono text-[10px] px-1.5 py-0.2 bg-crimson text-white font-bold">
+              {unreadCount} NEW
+            </span>
+          )}
+        </button>
+      </div>
+
+      {commsFeedback && (
+        <div className="mb-4 p-3 bg-[#111c13] border border-[#2b4c33] text-emerald-300 font-mono text-xs flex items-center gap-2">
+          <Check size={14} className="text-emerald-400 shrink-0" />
+          <span>{commsFeedback}</span>
+        </div>
+      )}
+
+      {/* TAB 1: OFFICIAL DIRECTIVES & 2-WAY STAFF DESK */}
+      {activeCommsTab === 'directives' && (
+        <div className="grid gap-8 lg:grid-cols-12">
+          {/* Left Column: Official Staff Bulletins & Announcements (7 cols) */}
+          <div className="lg:col-span-7 space-y-4">
+            <div className="panel p-4 border-t-2 border-t-crimson space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Bell size={15} className="text-crimson" />
+                  <span className="font-bold text-foreground uppercase tracking-wider text-xs">
+                    HEADQUARTERS BULLETINS &amp; ADVISORIES
+                  </span>
+                </div>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  AUTHORITATIVE BROADCAST FEED
+                </span>
+              </div>
+
+              {announcements.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground font-mono text-xs border border-dashed border-border">
+                  No active bulletins posted for your clearance at this time. Check back as investigation stages advance.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {announcements.map((ann) => (
+                    <div
+                      key={ann.id}
+                      className={`p-4 border transition-all ${
+                        ann.pinned
+                          ? 'border-amber-500/60 bg-[#16130b]'
+                          : 'border-border bg-[#111110]'
+                      }`}
                     >
-                      {m.sender}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground border border-border px-1 py-0.5">
-                      {m.stageWindow}
+                      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          {ann.pinned && (
+                            <span className="text-[9px] bg-amber-950/80 border border-amber-500 text-amber-300 px-1.5 py-0.2 flex items-center gap-1 font-mono font-bold">
+                              <Pin size={10} /> PINNED ADVISORY
+                            </span>
+                          )}
+                          <h3 className="font-serif text-base text-foreground font-semibold m-0">
+                            {ann.title}
+                          </h3>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {new Date(ann.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground mb-2.5">
+                        <span>Issued by: <strong className="text-foreground">{ann.createdBy}</strong></span>
+                        <span>·</span>
+                        <span>Target: <strong className="text-foreground uppercase">{ann.targetType === 'all' ? 'All Investigators' : `${ann.targetType}: ${ann.targetValue}`}</strong></span>
+                      </div>
+
+                      <p className="font-serif text-xs text-[#ded8cc] leading-relaxed m-0 whitespace-pre-wrap">
+                        {ann.message}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Private Direct 2-Way Staff Desk (5 cols) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="panel p-4 border-t-2 border-t-amber-500 flex flex-col justify-between space-y-3 min-h-[500px]">
+              <div>
+                <div className="flex items-center justify-between border-b border-border pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare size={15} className="text-amber-400" />
+                    <span className="font-bold text-foreground uppercase tracking-wider text-xs">
+                      PRIVATE STAFF DESK
                     </span>
                   </div>
-                  <span className="text-muted-foreground text-[10px]">{m.timestampIST}</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    2-WAY BILATERAL WIRE
+                  </span>
                 </div>
-                <p className="font-serif text-base text-[#e5dfd3] leading-relaxed m-0">{m.text}</p>
-              </div>
-            );
-          })}
 
-          {deliveredMessages.length === 0 && (
-            <div className="panel p-8 text-center text-muted-foreground font-mono text-xs">
-              No active dispatches available for your clearance level.
+                <p className="font-serif text-xs text-muted-foreground mt-2 mb-3 leading-relaxed">
+                  Direct bilateral communications channel between operative <strong className="text-foreground font-mono">{activeCallSign}</strong> and authorized case organizers. Submit technical queries, puzzle clarifications, or field inquiries.
+                </p>
+
+                {/* Message Transcript */}
+                <div className="p-3 bg-[#0a0a09] border border-border space-y-3 overflow-y-auto max-h-[300px] min-h-[200px]">
+                  {playerMessages.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground font-serif text-xs">
+                      No private messages exchanged yet. Use the message composer below to contact event organizers.
+                    </div>
+                  ) : (
+                    playerMessages.map((msg) => {
+                      const isStaff = msg.senderType === 'staff';
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`flex flex-col ${isStaff ? 'items-start' : 'items-end'}`}
+                        >
+                          <div className="flex items-center gap-1.5 text-[9px] font-mono text-muted-foreground mb-1">
+                            <span className={isStaff ? 'text-amber-400 font-bold' : 'text-crimson font-bold'}>
+                              {isStaff ? 'Headquarters Staff' : 'You (Operative)'}
+                            </span>
+                            <span>·</span>
+                            <span>{new Date(msg.createdAt).toLocaleTimeString()}</span>
+                          </div>
+                          <div
+                            className={`max-w-[90%] p-2.5 border font-serif text-xs leading-relaxed ${
+                              isStaff
+                                ? 'bg-[#1a170e] border-[#4a3a1f] text-[#f2e6cb]'
+                                : 'bg-[#140e0e] border-[#401f1f] text-[#ecd9d9]'
+                            }`}
+                          >
+                            <p className="m-0 whitespace-pre-wrap">{msg.message}</p>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Message Composer */}
+              <form onSubmit={handleSendMessageToStaff} className="space-y-2 pt-2 border-t border-border">
+                <textarea
+                  value={playerInputMessage}
+                  onChange={(e) => setPlayerInputMessage(e.target.value)}
+                  placeholder="Type dispatch or inquiry to Headquarters Staff..."
+                  rows={3}
+                  className="w-full bg-[#0c0c0b] border border-border p-2.5 text-xs text-foreground focus:outline-none focus:border-crimson font-serif"
+                  required
+                />
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Direct organizer channel
+                  </span>
+                  <button
+                    type="submit"
+                    disabled={isSendingMessage || !playerInputMessage.trim()}
+                    className="button button-primary text-xs font-mono font-bold py-1.5 px-4 flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Send size={12} />
+                    <span>{isSendingMessage ? 'Transmitting...' : 'Send to Staff'}</span>
+                  </button>
+                </div>
+              </form>
             </div>
-          )}
+          </div>
         </div>
+      )}
 
-        <div>
-          <div className="panel border-t-2 border-t-crimson space-y-4">
-            <div className="panel-heading">
-              <span>FREQUENCY MONITOR</span>
-              <Radio size={14} />
-            </div>
-            <p className="font-serif text-sm leading-relaxed text-muted-foreground m-0">
-              This communications channel is strictly one-way. Verified dispatches arrive as stage windows
-              advance or when critical forensic dockets are declassified.
-            </p>
+      {/* TAB 2: ARCHIVAL RADIO INTERCEPTS */}
+      {activeCommsTab === 'archival' && (
+        <div className="grid gap-8 lg:grid-cols-3">
+          <div className="lg:col-span-2 space-y-4">
+            {deliveredMessages.map((m) => {
+              const isRead = readSet.has(m.id);
 
-            <div className="p-3 bg-[#111110] border border-border text-xs font-mono space-y-1.5">
-              <div className="flex justify-between">
-                <span>TOTAL DISPATCHES:</span>
-                <span className="font-bold text-foreground">{deliveredMessages.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>UNREAD:</span>
-                <span className={unreadCount > 0 ? 'text-crimson font-bold' : 'text-emerald-400'}>
-                  {unreadCount}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>ACTIVE STAGE:</span>
-                <span className="text-foreground">STAGE 0{progress?.activeStage ?? 1}</span>
-              </div>
-            </div>
+              return (
+                <div
+                  key={m.id}
+                  onClick={() => handleMarkSingleRead(m.id)}
+                  className={`panel transition-all cursor-pointer ${
+                    !isRead ? 'ring-1 ring-crimson/50 shadow-[0_0_15px_rgba(200,40,40,0.15)]' : ''
+                  } ${
+                    m.tone === 'antagonist'
+                      ? 'border-[#5c2420] bg-[#1a0e0e]'
+                      : m.tone === 'director'
+                      ? 'border-[#2d3a31] bg-[#111713]'
+                      : m.tone === 'staff'
+                      ? 'border-[#544320] bg-[#1a170e]'
+                      : 'border-border bg-[#141514]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between font-mono text-xs uppercase tracking-wider mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {!isRead && (
+                        <span
+                          className="size-2 rounded-full bg-crimson animate-pulse inline-block"
+                          title="Unread dispatch"
+                        />
+                      )}
+                      <span
+                        className={
+                          m.tone === 'antagonist'
+                            ? 'text-crimson font-bold'
+                            : m.tone === 'director'
+                            ? 'text-[#8bb393] font-bold'
+                            : m.tone === 'staff'
+                            ? 'text-amber-400 font-bold'
+                            : 'text-muted-foreground'
+                        }
+                      >
+                        {m.sender}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground border border-border px-1 py-0.5">
+                        {m.stageWindow}
+                      </span>
+                    </div>
+                    <span className="text-muted-foreground text-[10px]">{m.timestampIST}</span>
+                  </div>
+                  <p className="font-serif text-base text-[#e5dfd3] leading-relaxed m-0">{m.text}</p>
+                </div>
+              );
+            })}
 
-            {onTriggerDirectorReplay && (
-              <button
-                onClick={() => {
-                  tacticalAudio.playButtonClick();
-                  onTriggerDirectorReplay();
-                }}
-                className="button button-secondary w-full text-xs font-mono py-2 flex items-center justify-center gap-2"
-              >
-                <RotateCcw size={13} />
-                <span>Review Director Case Protocol</span>
-              </button>
+            {deliveredMessages.length === 0 && (
+              <div className="panel p-8 text-center text-muted-foreground font-mono text-xs">
+                No active dispatches available for your clearance level.
+              </div>
             )}
+          </div>
 
-            <div className="pt-2 border-t border-line-soft font-mono text-xs space-y-2 text-muted-foreground">
-              <div className="flex justify-between">
-                <span>CHANNEL STATUS:</span>
-                <span className={progress?.systemFreezeTriggered ? 'text-crimson font-bold' : 'text-[#8bb393]'}>
-                  {progress?.systemFreezeTriggered ? 'SEVERED' : 'MONITORING'}
-                </span>
+          <div>
+            <div className="panel border-t-2 border-t-crimson space-y-4">
+              <div className="panel-heading">
+                <span>FREQUENCY MONITOR</span>
+                <Radio size={14} />
               </div>
-              <div className="flex justify-between">
-                <span>SAFETY PROTOCOL:</span>
-                <span className="text-foreground">ONE-WAY ONLY</span>
+              <p className="font-serif text-sm leading-relaxed text-muted-foreground m-0">
+                This communications channel is strictly one-way. Verified dispatches arrive as stage windows
+                advance or when critical forensic dockets are declassified.
+              </p>
+
+              <div className="p-3 bg-[#111110] border border-border text-xs font-mono space-y-1.5">
+                <div className="flex justify-between">
+                  <span>TOTAL DISPATCHES:</span>
+                  <span className="font-bold text-foreground">{deliveredMessages.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>UNREAD:</span>
+                  <span className={unreadCount > 0 ? 'text-crimson font-bold' : 'text-emerald-400'}>
+                    {unreadCount}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>ACTIVE STAGE:</span>
+                  <span className="text-foreground">STAGE 0{progress?.activeStage ?? 1}</span>
+                </div>
+              </div>
+
+              {onTriggerDirectorReplay && (
+                <button
+                  onClick={() => {
+                    tacticalAudio.playButtonClick();
+                    onTriggerDirectorReplay();
+                  }}
+                  className="button button-secondary w-full text-xs font-mono py-2 flex items-center justify-center gap-2"
+                >
+                  <RotateCcw size={13} />
+                  <span>Review Director Case Protocol</span>
+                </button>
+              )}
+
+              <div className="pt-2 border-t border-line-soft font-mono text-xs space-y-2 text-muted-foreground">
+                <div className="flex justify-between">
+                  <span>CHANNEL STATUS:</span>
+                  <span className={progress?.systemFreezeTriggered ? 'text-crimson font-bold' : 'text-[#8bb393]'}>
+                    {progress?.systemFreezeTriggered ? 'SEVERED' : 'MONITORING'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>SAFETY PROTOCOL:</span>
+                  <span className="text-foreground">ONE-WAY ARCHIVAL</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </>
   );
 }
@@ -4680,6 +5069,11 @@ function LeaderboardView({
   const isExcluded = Boolean(
     user.excludeFromLeaderboard ||
     progress.excludeFromLeaderboard ||
+    user.hasStageOverride ||
+    progress.hasStageOverride ||
+    (user.email &&
+      (user.email.toLowerCase().trim() === 'rudrapratapj.0562@gmail.com' ||
+        user.email.toLowerCase().trim() === 'rudrapratapf.0562@gmail.com')) ||
     user.isStaff
   );
 
@@ -5409,21 +5803,6 @@ function TeamView({
 
   useEffect(() => {
     loadTeamData();
-
-    // Auto-refresh team roster every 4 seconds so newly joined members appear on leader's screen
-    const interval = setInterval(() => {
-      loadTeamData();
-    }, 4000);
-
-    const onFocus = () => loadTeamData();
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
-    };
   }, [user.callSign]);
 
   // Handle creating a new team

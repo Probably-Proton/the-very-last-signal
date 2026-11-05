@@ -18,6 +18,24 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+export function sanitizeSupabaseUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.includes('your-project-id') || trimmed.includes('placeholder')) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return undefined;
+    }
+    // Return base origin (e.g., https://xyz.supabase.co), stripping trailing paths/slashes
+    return parsed.origin;
+  } catch {
+    return trimmed.replace(/\/+$/, '');
+  }
+}
+
 const rawUrl =
   (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL?.trim() : undefined) ||
   (typeof process !== 'undefined' && process.env ? process.env.VITE_SUPABASE_URL?.trim() : undefined);
@@ -25,19 +43,13 @@ const rawAnonKey =
   (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() : undefined) ||
   (typeof process !== 'undefined' && process.env ? process.env.VITE_SUPABASE_ANON_KEY?.trim() : undefined);
 
-// Verify whether credentials are valid and not default documentation placeholders
-function checkIsConfigured(url?: string, key?: string): boolean {
-  if (!url || !key) return false;
-  if (url.includes('your-project-id') || key.includes('placeholder')) return false;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
-  } catch {
-    return false;
-  }
-}
+const cleanUrl = sanitizeSupabaseUrl(rawUrl);
 
-export const isSupabaseConfigured: boolean = checkIsConfigured(rawUrl, rawAnonKey);
+export const isSupabaseConfigured: boolean = Boolean(
+  cleanUrl &&
+  rawAnonKey &&
+  !rawAnonKey.includes('placeholder')
+);
 
 export interface SupabaseConfigStatus {
   isConfigured: boolean;
@@ -90,8 +102,8 @@ if (typeof window !== 'undefined') {
  * Returns the authenticated client if VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set,
  * or null if running in offline / prototype mode.
  */
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(rawUrl!, rawAnonKey!, {
+export const supabase: SupabaseClient | null = isSupabaseConfigured && cleanUrl && rawAnonKey
+  ? createClient(cleanUrl, rawAnonKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,

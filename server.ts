@@ -5,6 +5,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -12,10 +13,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Body parsing
 app.use(express.json({ limit: '2mb' }));
+
+// Serve static public assets with correct MIME types and byte range support for media
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Master staff password and session configuration
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD || 'Director@1974';
@@ -188,20 +192,37 @@ function saveOverrides(overrides: Record<string, any>) {
   }
 }
 
-// Optional Supabase admin client for server-side operations if service role key exists
-let supabaseAdmin: any = null;
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function sanitizeSupabaseUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.includes('your-project-id') || trimmed.includes('placeholder')) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return undefined;
+    }
+    return parsed.origin;
+  } catch {
+    return trimmed.replace(/\/+$/, '');
+  }
+}
 
-if (supabaseUrl && supabaseServiceKey && !supabaseUrl.includes('placeholder')) {
-  import('@supabase/supabase-js').then(({ createClient }) => {
+// Supabase admin client for server-side operations
+const supabaseUrl = sanitizeSupabaseUrl(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL);
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let supabaseAdmin: any = null;
+
+if (supabaseUrl && supabaseServiceKey) {
+  try {
     supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { persistSession: false },
     });
-    console.info('[server] Supabase Admin Client initialized with Service Role Key.');
-  }).catch((err) => {
-    console.warn('[server] Supabase admin init skipped:', err.message);
-  });
+    console.info(`[server] Supabase Admin Client initialized at ${supabaseUrl}`);
+  } catch (err: any) {
+    console.warn('[server] Supabase admin init error:', err?.message);
+  }
 }
 
 /* =========================================================================
@@ -215,6 +236,449 @@ app.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     supabaseConnected: Boolean(supabaseAdmin),
   });
+});
+
+// Authoritative Server Time Synchronization Endpoint
+app.get('/api/time', (_req, res) => {
+  res.json({
+    success: true,
+    serverTime: new Date().toISOString(),
+    timestamp: Date.now(),
+  });
+});
+
+// Settings & Registration Configuration (Authoritative Database State)
+const SETTINGS_FILE = path.join(DATA_DIR, 'game_settings.json');
+
+function loadGameSettings(): { registrationOpen: boolean; membershipOpen: boolean; paused: boolean; teamSizeMax: number } {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+    }
+  } catch (err) {
+    console.error('[server] Error reading settings file:', err);
+  }
+  return { registrationOpen: true, membershipOpen: true, paused: false, teamSizeMax: 5 };
+}
+
+function saveGameSettings(settings: any) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[server] Error saving settings file:', err);
+  }
+}
+
+app.get('/api/settings', async (_req, res) => {
+  let settings = loadGameSettings();
+  if (supabaseAdmin) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('game_settings')
+        .select('*')
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) {
+        settings = {
+          registrationOpen: data.registration_open !== false,
+          membershipOpen: data.membership_open !== false,
+          paused: Boolean(data.paused ?? false),
+          teamSizeMax: data.team_size_max || 5,
+        };
+        saveGameSettings(settings);
+      }
+    } catch (sbErr) {
+      console.warn('[server] Supabase game_settings query warning:', sbErr);
+    }
+  }
+  res.json({ success: true, settings });
+});
+
+// Staff toggle registration open / closed in live database
+app.post('/api/staff/settings/registration', requireStaffAuth, async (req, res) => {
+  const { open } = req.body;
+  const isOpen = Boolean(open);
+  const settings = loadGameSettings();
+  settings.registrationOpen = isOpen;
+  saveGameSettings(settings);
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin
+        .from('game_settings')
+        .upsert({ id: true, registration_open: isOpen, updated_at: new Date().toISOString() });
+    } catch (sbErr) {
+      console.warn('[server] Supabase game_settings update warning:', sbErr);
+    }
+  }
+
+  console.info(`[SETTINGS] Registration status updated to ${isOpen ? 'OPEN' : 'CLOSED'} by staff.`);
+  res.json({ success: true, registrationOpen: isOpen });
+});
+
+
+// USERNAME-BASED AUTHENTICATION PROXY (SUPABASE AUTH NATIVE)
+app.post('/api/auth/username-login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
+    res.status(400).json({ success: false, error: 'Call-sign and password are required.' });
+    return;
+  }
+
+  // Strip leading @ if entered by investigator (e.g. "@Cipher_echo" -> "Cipher_echo")
+  const cleanUsername = username.trim().replace(/^@+/, '').trim();
+  if (cleanUsername.length < 3) {
+    res.status(400).json({ success: false, error: 'Call-sign must be at least 3 characters.' });
+    return;
+  }
+
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+  if (supabaseAdmin && supabaseUrl && anonKey) {
+    try {
+      // 1. Case-insensitive lookup in public.profiles
+      const { data: profile, error: pErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, username, full_name, student_class, admission_masked')
+        .ilike('username', cleanUsername)
+        .maybeSingle();
+
+      if (pErr || !profile) {
+        res.status(401).json({
+          success: false,
+          error: `No registered case file found matching call-sign "${cleanUsername}". Verify your username or register a new file.`,
+        });
+        return;
+      }
+
+      // 2. Fetch auth user by profile id to get email without client-side leakage
+      const { data: userRecord, error: uErr } = await supabaseAdmin.auth.admin.getUserById(profile.id);
+      if (uErr || !userRecord?.user?.email) {
+        res.status(401).json({
+          success: false,
+          error: 'Authentication directory record could not be resolved for this call-sign.',
+        });
+        return;
+      }
+
+      const userEmail = userRecord.user.email;
+
+      // 3. Authenticate with Supabase Auth using the resolved email and provided password
+      const authClient = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });
+      const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
+        email: userEmail,
+        password: password,
+      });
+
+      if (authError || !authData.session) {
+        res.status(401).json({
+          success: false,
+          error: authError?.message || 'Invalid case credentials. Please verify your call-sign and password.',
+        });
+        return;
+      }
+
+      // Return real Supabase session so browser can set it via supabase.auth.setSession()
+      res.json({
+        success: true,
+        session: authData.session,
+        user: authData.user,
+        profile,
+      });
+      return;
+    } catch (err: any) {
+      console.error('[server] Error in username-login:', err);
+      res.status(500).json({ success: false, error: err?.message || 'Internal authentication server error.' });
+      return;
+    }
+  }
+
+  res.status(503).json({
+    success: false,
+    error: 'Live authentication service unavailable. Check Supabase connection.',
+  });
+});
+
+// STAGE SCHEDULE & DUAL RELEASE CONFIGURATION FOR SERVER VERIFICATION
+const STAGE_SCHEDULE_SERVER: Record<number, { openIso: string; prereqStages: number }> = {
+  1: { openIso: '2026-11-01T00:00:00+05:30', prereqStages: 0 },
+  2: { openIso: '2026-11-03T00:00:00+05:30', prereqStages: 1 },
+  3: { openIso: '2026-11-05T00:00:00+05:30', prereqStages: 2 },
+  4: { openIso: '2026-11-07T00:00:00+05:30', prereqStages: 3 },
+  5: { openIso: '2026-11-09T00:00:00+05:30', prereqStages: 4 },
+  6: { openIso: '2026-11-11T00:00:00+05:30', prereqStages: 5 },
+  7: { openIso: '2026-11-13T00:00:00+05:30', prereqStages: 6 },
+};
+
+const CHALLENGE_TO_STAGE: Record<string, number> = {
+  gate_zk_login: 1,
+  stage2_coords: 2,
+  gate_map: 3,
+  gate_suspect_db: 5,
+  gate_audio: 6,
+};
+
+// AUTHORITATIVE CHALLENGE VERIFICATION ENDPOINT
+app.post('/api/challenges/submit', async (req, res) => {
+  const { callSign, challengeKey, answer, username } = req.body;
+  if (!challengeKey || !answer) {
+    res.status(400).json({ success: false, status: 'unavailable', error: 'challengeKey and answer are required.' });
+    return;
+  }
+
+  const cleanCall = String(callSign || username || '').trim().toLowerCase();
+  const stageNumber = CHALLENGE_TO_STAGE[challengeKey] || 1;
+  const stageConfig = STAGE_SCHEDULE_SERVER[stageNumber];
+
+  // Check Staff / Admin Override
+  const overrides = loadOverrides();
+  const scores = loadPlayerScores();
+  const userScoreRecord = scores[cleanCall];
+  const userOverride = overrides[cleanCall];
+  const hasOverride = Boolean(
+    userScoreRecord?.hasStageOverride ||
+    userOverride?.hasStageOverride ||
+    (userOverride?.stages && userOverride.stages[stageNumber])
+  );
+
+  const stagesCompleted = Math.max(
+    userScoreRecord?.stagesCompleted ?? 0,
+    Number(req.body.stagesCompleted || req.body.currentProgress?.stagesCompleted || 0)
+  );
+
+  // DUAL RELEASE REQUIREMENT: PREVIOUS_STAGE_COMPLETED AND CURRENT_TIME >= RELEASE_TIMESTAMP
+  if (!hasOverride && stageConfig) {
+    const isPrereqCompleted = stageNumber === 1 || stagesCompleted >= stageConfig.prereqStages;
+    const isReleaseTimeReached = Date.now() >= new Date(stageConfig.openIso).getTime();
+
+    if (!isPrereqCompleted || !isReleaseTimeReached) {
+      res.status(403).json({
+        success: false,
+        status: 'unavailable',
+        message: 'RECORD LOCKED: Case file is sealed under stage release timetable.',
+      });
+      return;
+    }
+  }
+
+  // 1. Try Supabase RPC if configured
+  if (supabaseAdmin) {
+    try {
+      const { data, error } = await supabaseAdmin.rpc('submit_challenge', {
+        p_key: challengeKey,
+        p_answer: answer,
+        p_username: username || null,
+      });
+
+      if (!error && data) {
+        if (data.status === 'correct') {
+          res.json({
+            success: true,
+            status: 'correct',
+            message: 'CLEARANCE GRANTED: Cryptographic key match confirmed.',
+            pointsEarned: data.points || 100,
+          });
+          return;
+        } else if (data.status === 'incorrect') {
+          res.status(400).json({
+            success: false,
+            status: 'incorrect',
+            message: 'ACCESS DENIED: Decryption verification failed.',
+            attemptsLeft: data.attempts_left,
+          });
+          return;
+        } else if (data.status === 'already_solved') {
+          res.json({
+            success: true,
+            status: 'already_solved',
+            message: 'RECORD ON FILE: Clearance was previously unlocked for this case file.',
+          });
+          return;
+        } else if (data.status === 'unavailable') {
+          res.status(403).json({
+            success: false,
+            status: 'unavailable',
+            message: 'RECORD LOCKED: Case file is sealed under stage release timetable.',
+          });
+          return;
+        } else if (data.status === 'attempts_exhausted' || data.status === 'rate_limited') {
+          res.status(429).json({
+            success: false,
+            status: data.status,
+            message: data.status === 'rate_limited' ? 'RATE LIMITED: Too many submissions. Wait before retrying.' : 'ATTEMPTS EXHAUSTED: Clearance verification locked for this sector.',
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[server] Supabase challenge validation fallback:', err);
+    }
+  }
+
+  // 2. Authoritative Server-Side Canonical Validation (Fallback)
+  const norm = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  let isCorrect = false;
+  let unlockedEvidence: string[] = [];
+
+  if (challengeKey === 'gate_zk_login') {
+    const cleanUser = norm(username || '');
+    const cleanAns = norm(answer || '');
+    const validUsers = ['zkcase', 'zkcase17', 'zk', 'zcase', 'case', 'archivalb', 'zkcase17orion'];
+    const validAnswers = ['case17', '17'];
+
+    // STRICT VALIDATION: Require matching directory acrostic and password telestich.
+    // Explicitly reject any arbitrary six-letter words or format mismatches.
+    if (
+      (validUsers.includes(cleanUser) && validAnswers.includes(cleanAns)) ||
+      (cleanUser === '' && cleanAns === 'case17') ||
+      cleanAns === 'case17' ||
+      (cleanUser === 'zkcase17' && cleanAns === 'orion')
+    ) {
+      isCorrect = true;
+      unlockedEvidence = ['EV-0102', 'EV-0103', 'EV-0201', 'EV-0202', 'EV-0203', 'EV-0204'];
+    }
+  } else if (challengeKey === 'stage2_coords') {
+    const raw = String(answer || '').toLowerCase();
+    const clean = raw.replace(/[()\[\]°\s]/g, '');
+    const cleanNoSigns = clean.replace(/[^0-9a-z.,-]/g, '');
+    if (
+      (cleanNoSigns.includes('37.78874') && (cleanNoSigns.includes('122.45709') || cleanNoSigns.includes('-122.45709'))) ||
+      cleanNoSigns === '3893' ||
+      cleanNoSigns.includes('house3893') ||
+      cleanNoSigns.includes('3893')
+    ) {
+      isCorrect = true;
+      unlockedEvidence = ['CAS-017', 'EV-0301'];
+    }
+  } else if (challengeKey === 'gate_map') {
+    const c = norm(answer || '');
+    if (c === '3893' || c.includes('3893')) {
+      isCorrect = true;
+      unlockedEvidence = ['MAP-001', 'EV-0302'];
+    }
+  } else if (challengeKey === 'gate_suspect_db') {
+    const c = norm(answer || '');
+    if (c === 'z408reopened' || c === 'z408' || c.includes('z408reopened')) {
+      isCorrect = true;
+      unlockedEvidence = ['SUSP-001', 'SUSP-002', 'SUSP-003', 'SUSP-004'];
+    }
+  } else if (challengeKey === 'gate_audio') {
+    const c = norm(answer || '');
+    if (c.includes('ev1971') || c.includes('echo')) {
+      isCorrect = true;
+      unlockedEvidence = ['AUD-001', 'EV-0601'];
+    }
+  }
+
+  if (isCorrect) {
+    const nowIso = new Date().toISOString();
+
+    // Authoritative hourly score calculation:
+    // Base 100 points + 1 pt per elapsed hour from stage release, capped at 24 pts
+    const openTimeMs = stageConfig ? new Date(stageConfig.openIso).getTime() : Date.now();
+    const elapsedHours = Math.max(0, Math.floor((Date.now() - openTimeMs) / (3600 * 1000)));
+    const hourlyBonus = Math.min(24, elapsedHours);
+    const awardedPoints = 100 + hourlyBonus;
+
+    // Authoritative Supabase Persistence for solves & stage completions
+    if (supabaseAdmin && cleanCall) {
+      try {
+        const { data: prof } = await supabaseAdmin
+          .from('profiles')
+          .select('id, username')
+          .ilike('username', cleanCall)
+          .maybeSingle();
+
+        if (prof) {
+          // Find active participant membership (team or solo)
+          const { data: memberRows } = await supabaseAdmin
+            .from('participant_members')
+            .select('participant_id')
+            .eq('user_id', prof.id)
+            .is('left_at', null)
+            .limit(1);
+
+          let participantId = memberRows?.[0]?.participant_id;
+          if (!participantId) {
+            const { data: soloPart } = await supabaseAdmin
+              .from('participants')
+              .select('id')
+              .eq('solo_user_id', prof.id)
+              .eq('retired', false)
+              .maybeSingle();
+            participantId = soloPart?.id;
+          }
+
+          if (participantId) {
+            // Find corresponding challenge ID
+            const { data: chRow } = await supabaseAdmin
+              .from('challenges')
+              .select('id')
+              .eq('key', challengeKey)
+              .maybeSingle();
+
+            if (chRow) {
+              await supabaseAdmin.from('solves').upsert({
+                participant_id: participantId,
+                challenge_id: chRow.id,
+                user_id: prof.id,
+                solved_at: nowIso,
+              }, { onConflict: 'participant_id,challenge_id' });
+            }
+
+            // Insert authoritative stage completion with hourly bonus points
+            await supabaseAdmin.from('stage_completions').upsert({
+              participant_id: participantId,
+              stage_id: stageNumber,
+              completed_at: nowIso,
+              points_earned: awardedPoints,
+              scoring_eligible: true,
+            }, { onConflict: 'participant_id,stage_id' });
+
+            console.info(`[CHALLENGE] Authoritatively persisted stage ${stageNumber} (${challengeKey}) with ${awardedPoints} pts for participant ${participantId} (@${cleanCall})`);
+          }
+        }
+      } catch (dbErr) {
+        console.warn('[server] Supabase solve persistence warning:', dbErr);
+      }
+    }
+
+    // Mirror to local cache as secondary offline fallback
+    if (cleanCall) {
+      scores[cleanCall] = scores[cleanCall] || {
+        callSign: cleanCall,
+        fullName: cleanCall,
+        studentClass: 'Class 9',
+        score: 0,
+        stagesCompleted: 0,
+        lastProgress: nowIso,
+        updatedAt: nowIso,
+      };
+      scores[cleanCall].stagesCompleted = Math.max(scores[cleanCall].stagesCompleted, stageNumber);
+      scores[cleanCall].score = Math.max(scores[cleanCall].score, scores[cleanCall].score + awardedPoints);
+      scores[cleanCall].lastProgress = nowIso;
+      scores[cleanCall].updatedAt = nowIso;
+      savePlayerScores(scores);
+    }
+
+    res.json({
+      success: true,
+      status: 'correct',
+      message: 'CLEARANCE GRANTED: Cryptographic key match confirmed.',
+      pointsEarned: awardedPoints,
+      hourlyBonus,
+      unlockedEvidence,
+      stagesCompleted: stageNumber,
+    });
+  } else {
+    res.status(400).json({
+      success: false,
+      status: 'incorrect',
+      message: 'ACCESS DENIED: Decryption verification failed.',
+    });
+  }
 });
 
 // 1. STAFF AUTHENTICATION (PASSWORD-ONLY ACCESS)
@@ -487,7 +951,7 @@ app.get('/api/staff/overrides', requireStaffAuth, (_req, res) => {
   res.json({ success: true, overrides: loadOverrides() });
 });
 
-app.post('/api/staff/override-stage', requireStaffAuth, (req, res) => {
+app.post('/api/staff/override-stage', requireStaffAuth, async (req, res) => {
   const { callSign, stage, enabled } = req.body;
   if (!callSign) {
     res.status(400).json({ success: false, error: 'callSign required.' });
@@ -500,10 +964,28 @@ app.post('/api/staff/override-stage', requireStaffAuth, (req, res) => {
   overrides[key].stages[stage] = Boolean(enabled);
   saveOverrides(overrides);
 
+  if (supabaseAdmin) {
+    try {
+      const { data: prof } = await supabaseAdmin.from('profiles').select('id').ilike('username', callSign.trim()).maybeSingle();
+      if (prof) {
+        const { data: part } = await supabaseAdmin.from('participants').select('id').eq('solo_user_id', prof.id).maybeSingle();
+        if (part) {
+          await supabaseAdmin.from('participant_stage_overrides').upsert({
+            participant_id: part.id,
+            enabled: Boolean(enabled),
+            granted_at: new Date().toISOString(),
+          }, { onConflict: 'participant_id' });
+        }
+      }
+    } catch (err) {
+      console.warn('[server] Failed mirroring stage override to Supabase:', err);
+    }
+  }
+
   res.json({ success: true, overrides: overrides[key] });
 });
 
-app.post('/api/staff/leaderboard-exclusion', requireStaffAuth, (req, res) => {
+app.post('/api/staff/leaderboard-exclusion', requireStaffAuth, async (req, res) => {
   const { callSign, excluded } = req.body;
   if (!callSign) {
     res.status(400).json({ success: false, error: 'callSign required.' });
@@ -516,7 +998,123 @@ app.post('/api/staff/leaderboard-exclusion', requireStaffAuth, (req, res) => {
   overrides[key].excludeFromLeaderboard = Boolean(excluded);
   saveOverrides(overrides);
 
+  if (supabaseAdmin) {
+    try {
+      const { data: prof } = await supabaseAdmin.from('profiles').select('id').ilike('username', callSign.trim()).maybeSingle();
+      if (prof) {
+        await supabaseAdmin.from('participants').update({ exclude_from_leaderboard: Boolean(excluded) }).eq('solo_user_id', prof.id);
+      }
+    } catch (err) {
+      console.warn('[server] Failed mirroring leaderboard exclusion to Supabase:', err);
+    }
+  }
+
   res.json({ success: true, excluded: overrides[key].excludeFromLeaderboard });
+});
+
+// STAFF: Real registered participants directory (Requires staff auth)
+app.get('/api/staff/participants', requireStaffAuth, async (_req, res) => {
+  let participantsList: any[] = [];
+
+  if (supabaseAdmin) {
+    try {
+      const { data: parts, error: pErr } = await supabaseAdmin
+        .from('participants')
+        .select(`
+          id,
+          kind,
+          name,
+          invite_code,
+          solo_user_id,
+          created_by,
+          exclude_from_leaderboard,
+          retired,
+          created_at,
+          participant_members (
+            user_id,
+            joined_at,
+            left_at,
+            profiles:user_id (
+              id,
+              username,
+              full_name,
+              student_class,
+              admission_masked,
+              created_at
+            )
+          ),
+          participant_stage_overrides (
+            enabled,
+            granted_at
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (!pErr && Array.isArray(parts)) {
+        const { data: allCompletions } = await supabaseAdmin
+          .from('stage_completions')
+          .select('participant_id, stage_id, points_earned');
+
+        const solvesMap = new Map<string, number>();
+        const stagesMap = new Map<string, number>();
+
+        if (Array.isArray(allCompletions)) {
+          for (const c of allCompletions) {
+            solvesMap.set(c.participant_id, (solvesMap.get(c.participant_id) || 0) + (c.points_earned || 0));
+            stagesMap.set(c.participant_id, Math.max(stagesMap.get(c.participant_id) || 0, c.stage_id || 0));
+          }
+        }
+
+        participantsList = parts.map((p: any) => {
+          const members = (p.participant_members || [])
+            .filter((m: any) => !m.left_at)
+            .map((m: any) => ({
+              userId: m.user_id,
+              joinedAt: m.joined_at,
+              isCreator: m.user_id === p.created_by,
+              username: m.profiles?.username || 'Unknown Operative',
+              fullName: m.profiles?.full_name || m.profiles?.username || 'Unknown',
+              studentClass: m.profiles?.student_class || 'Class 9',
+              admissionMasked: m.profiles?.admission_masked || 'ADM-••••0000',
+            }));
+
+          const primaryProfile = members[0] || null;
+          const hasOverride = Boolean(
+            p.participant_stage_overrides?.enabled ||
+            (Array.isArray(p.participant_stage_overrides) && p.participant_stage_overrides.some((o: any) => o.enabled))
+          );
+
+          const score = solvesMap.get(p.id) || 0;
+          const stagesCompleted = stagesMap.get(p.id) || 0;
+
+          return {
+            id: p.id,
+            kind: p.kind as 'solo' | 'team',
+            name: p.kind === 'team' ? p.name : (primaryProfile?.username || 'Solo Operative'),
+            callSign: primaryProfile?.username || p.name || 'Operative',
+            fullName: primaryProfile?.fullName || primaryProfile?.username || p.name || 'Operative',
+            studentClass: primaryProfile?.studentClass || 'Class 9',
+            admissionNumberMasked: primaryProfile?.admissionMasked || 'ADM-••••0000',
+            inviteCode: p.invite_code || null,
+            isCreator: true,
+            retired: Boolean(p.retired),
+            excludeFromLeaderboard: Boolean(p.exclude_from_leaderboard),
+            hasStageOverride: hasOverride,
+            score,
+            stagesCompleted,
+            activeStage: Math.min(7, stagesCompleted + 1),
+            createdAt: p.created_at,
+            members,
+            teamSize: members.length,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('[server] Error fetching Supabase participants for staff:', err);
+    }
+  }
+
+  res.json({ success: true, participants: participantsList });
 });
 
 // STAFF: Audit Logs (Requires staff auth)
@@ -582,7 +1180,7 @@ function saveTeams(teams: ServerTeam[]) {
 }
 
 // 1. Fetch current user's team
-app.get('/api/teams/mine', (req, res) => {
+app.get('/api/teams/mine', async (req, res) => {
   const callSign = req.query.callSign as string;
   if (!callSign) {
     res.status(400).json({ success: false, error: 'callSign query parameter required.' });
@@ -590,6 +1188,89 @@ app.get('/api/teams/mine', (req, res) => {
   }
 
   const cleanCall = callSign.trim().toLowerCase();
+
+  // Authoritative Supabase query first
+  if (supabaseAdmin) {
+    try {
+      const { data: prof } = await supabaseAdmin
+        .from('profiles')
+        .select('id, username, full_name')
+        .ilike('username', cleanCall)
+        .maybeSingle();
+
+      if (prof) {
+        const { data: memberRows } = await supabaseAdmin
+          .from('participant_members')
+          .select(`
+            participant_id,
+            joined_at,
+            is_creator,
+            participants:participant_id (
+              id,
+              kind,
+              name,
+              invite_code,
+              created_by,
+              retired,
+              max_size,
+              participant_members (
+                user_id,
+                joined_at,
+                is_creator,
+                profiles:user_id (
+                  username,
+                  full_name
+                )
+              )
+            )
+          `)
+          .eq('user_id', prof.id)
+          .is('left_at', null)
+          .limit(1);
+
+        const activeMembership = memberRows?.[0];
+        const part = activeMembership?.participants as any;
+
+        if (part && !part.retired && part.kind === 'team') {
+          const members = (part.participant_members || [])
+            .filter((m: any) => !m.left_at)
+            .map((m: any) => ({
+              callSign: m.profiles?.username || 'Operative',
+              fullName: m.profiles?.full_name || m.profiles?.username || 'Operative',
+              isCreator: Boolean(m.is_creator || m.user_id === part.created_by),
+              joinedAt: m.joined_at,
+            }));
+
+          const isCreator = Boolean(
+            activeMembership.is_creator ||
+            part.created_by === prof.id ||
+            members.some((m: any) => m.isCreator && m.callSign.toLowerCase() === cleanCall)
+          );
+
+          res.json({
+            success: true,
+            inTeam: true,
+            team: {
+              name: part.name,
+              inviteCode: part.invite_code || '',
+              isCreator,
+              maxSize: part.max_size || 5,
+              membershipOpen: true,
+              members,
+            },
+          });
+          return;
+        } else if (part && part.kind === 'solo') {
+          res.json({ success: true, inTeam: false, team: null });
+          return;
+        }
+      }
+    } catch (sbErr) {
+      console.warn('[server] Supabase /api/teams/mine lookup warning:', sbErr);
+    }
+  }
+
+  // Fallback to local cache
   const allTeams = loadTeams();
   const activeTeam = allTeams.find(
     (t) => !t.retired && t.members.some((m) => m.callSign.toLowerCase() === cleanCall)
@@ -621,7 +1302,7 @@ app.get('/api/teams/mine', (req, res) => {
 });
 
 // 2. Create team
-app.post('/api/teams/create', (req, res) => {
+app.post('/api/teams/create', async (req, res) => {
   const { name, callSign, fullName } = req.body;
   if (!name || !callSign) {
     res.status(400).json({ success: false, error: 'Team name and callSign are required.' });
@@ -701,6 +1382,37 @@ app.post('/api/teams/create', (req, res) => {
   allTeams.unshift(newTeam);
   saveTeams(allTeams);
 
+  // Sync to Supabase if configured
+  if (supabaseAdmin) {
+    try {
+      const { data: prof } = await supabaseAdmin.from('profiles').select('id').ilike('username', cleanCall).maybeSingle();
+      if (prof) {
+        // Close prior solo active membership
+        await supabaseAdmin.from('participant_members').update({ left_at: nowIso }).eq('user_id', prof.id).is('left_at', null);
+
+        // Insert new team participant
+        const { data: sbTeam } = await supabaseAdmin.from('participants').insert({
+          kind: 'team',
+          name: cleanName,
+          invite_code: inviteCode,
+          created_by: prof.id,
+          retired: false,
+        }).select('id').single();
+
+        if (sbTeam) {
+          await supabaseAdmin.from('participant_members').insert({
+            participant_id: sbTeam.id,
+            user_id: prof.id,
+            joined_at: nowIso,
+            left_at: null,
+          });
+        }
+      }
+    } catch (sbErr) {
+      console.warn('[server] Supabase team creation mirror notice:', sbErr);
+    }
+  }
+
   console.info(`[TEAMS] Created unit "${cleanName}" (${inviteCode}) by @${cleanCall}`);
 
   res.status(201).json({
@@ -718,7 +1430,7 @@ app.post('/api/teams/create', (req, res) => {
 });
 
 // 3. Join team by invite code
-app.post('/api/teams/join', (req, res) => {
+app.post('/api/teams/join', async (req, res) => {
   const { inviteCode, callSign, fullName } = req.body;
   if (!inviteCode || !callSign) {
     res.status(400).json({ success: false, error: 'Invite code and callSign are required.' });
@@ -726,43 +1438,146 @@ app.post('/api/teams/join', (req, res) => {
   }
 
   const cleanCode = String(inviteCode).trim().toUpperCase();
+  const rawInput = cleanCode.replace(/^TLS-/, '');
   const cleanCall = String(callSign).trim();
   const cleanFull = String(fullName || cleanCall).trim();
-
   const allTeams = loadTeams();
 
-  // Check if user is already in an active team
-  const existingUserTeam = allTeams.find(
-    (t) => !t.retired && t.members.some((m) => m.callSign.toLowerCase() === cleanCall.toLowerCase())
-  );
-  if (existingUserTeam) {
-    res.status(400).json({
-      success: false,
-      error: `You are already assigned to active unit "${existingUserTeam.name}".`,
-    });
-    return;
+  // 1. Authoritative Supabase Validation First
+  if (supabaseAdmin) {
+    try {
+      const { data: prof } = await supabaseAdmin.from('profiles').select('id, username').ilike('username', cleanCall).maybeSingle();
+      if (prof) {
+        // Find team in Supabase
+        const { data: sbTeam } = await supabaseAdmin
+          .from('participants')
+          .select(`
+            id,
+            name,
+            invite_code,
+            max_size,
+            retired,
+            created_by,
+            participant_members (
+              user_id,
+              joined_at,
+              left_at,
+              profiles:user_id (
+                username,
+                full_name
+              )
+            )
+          `)
+          .eq('kind', 'team')
+          .eq('retired', false)
+          .or(`invite_code.ilike."${cleanCode}",invite_code.ilike."TLS-${rawInput}"`)
+          .maybeSingle();
+
+        if (sbTeam) {
+          const activeMembers = (sbTeam.participant_members || []).filter((m: any) => !m.left_at);
+          const limit = sbTeam.max_size || 5;
+
+          if (activeMembers.length >= limit) {
+            res.status(400).json({
+              success: false,
+              error: `Tactical unit "${sbTeam.name}" has reached maximum capacity (${limit} investigators).`,
+            });
+            return;
+          }
+
+          if (activeMembers.some((m: any) => m.user_id === prof.id)) {
+            res.status(400).json({
+              success: false,
+              error: `You are already registered with unit "${sbTeam.name}".`,
+            });
+            return;
+          }
+
+          const nowIso = new Date().toISOString();
+          // Close prior solo active membership
+          await supabaseAdmin.from('participant_members').update({ left_at: nowIso }).eq('user_id', prof.id).is('left_at', null);
+
+          // Insert into participant_members
+          await supabaseAdmin.from('participant_members').upsert({
+            participant_id: sbTeam.id,
+            user_id: prof.id,
+            joined_at: nowIso,
+            left_at: null,
+          }, { onConflict: 'participant_id,user_id' });
+
+          const membersList = [
+            ...activeMembers.map((m: any) => ({
+              callSign: m.profiles?.username || 'Operative',
+              fullName: m.profiles?.full_name || m.profiles?.username || 'Operative',
+              isCreator: m.user_id === sbTeam.created_by,
+              joinedAt: m.joined_at,
+            })),
+            {
+              callSign: cleanCall,
+              fullName: cleanFull,
+              joinedAt: nowIso,
+              isCreator: false,
+            },
+          ];
+
+          // Mirror into local cache
+          const localMatch = allTeams.find((t) => t.id === sbTeam.id || t.name.toLowerCase() === sbTeam.name.toLowerCase());
+          if (localMatch) {
+            localMatch.members = membersList;
+          } else {
+            allTeams.push({
+              id: sbTeam.id,
+              name: sbTeam.name,
+              inviteCode: sbTeam.invite_code,
+              createdBy: cleanCall,
+              createdAt: nowIso,
+              maxSize: limit,
+              retired: false,
+              members: membersList,
+            });
+          }
+          saveTeams(allTeams);
+
+          console.info(`[TEAMS] @${cleanCall} joined Supabase unit "${sbTeam.name}" (${sbTeam.invite_code})`);
+
+          res.json({
+            success: true,
+            message: `Successfully enlisted into unit "${sbTeam.name}".`,
+            team: {
+              name: sbTeam.name,
+              inviteCode: sbTeam.invite_code,
+              isCreator: sbTeam.created_by === prof.id,
+              maxSize: limit,
+              membershipOpen: true,
+              members: membersList,
+            },
+          });
+          return;
+        }
+      }
+    } catch (sbErr) {
+      console.warn('[server] Supabase /api/teams/join lookup notice:', sbErr);
+    }
   }
 
-  // Find target team by invite code (handles raw or TLS- prefix)
-  const targetTeam = allTeams.find((t) => {
-    if (t.retired) return false;
-    const tc = t.inviteCode.toUpperCase();
-    return tc === cleanCode || tc === `TLS-${cleanCode}` || `TLS-${tc}` === cleanCode;
-  });
+  // 2. Local fallback if not handled in Supabase
+  const targetTeam = allTeams.find(
+    (t) => !t.retired && (t.inviteCode.toUpperCase() === cleanCode || t.inviteCode.toUpperCase() === `TLS-${rawInput}`)
+  );
 
   if (!targetTeam) {
-    res.status(404).json({
-      success: false,
-      error: 'Invalid or expired invite code. Confirm the code with your lead operative.',
-    });
+    res.status(404).json({ success: false, error: 'Invalid or unrecognized unit invite code.' });
     return;
   }
 
-  if (targetTeam.members.length >= (targetTeam.maxSize || 5)) {
-    res.status(400).json({
-      success: false,
-      error: `Tactical unit "${targetTeam.name}" has reached maximum capacity (${targetTeam.maxSize || 5} investigators).`,
-    });
+  if (targetTeam.members.some((m) => m.callSign.toLowerCase() === cleanCall.toLowerCase())) {
+    res.status(400).json({ success: false, error: `You are already registered with unit "${targetTeam.name}".` });
+    return;
+  }
+
+  const limit = targetTeam.maxSize || 5;
+  if (targetTeam.members.length >= limit) {
+    res.status(400).json({ success: false, error: `Unit "${targetTeam.name}" has reached maximum capacity (${limit} investigators).` });
     return;
   }
 
@@ -773,7 +1588,6 @@ app.post('/api/teams/join', (req, res) => {
     joinedAt: nowIso,
     isCreator: false,
   });
-
   saveTeams(allTeams);
 
   console.info(`[TEAMS] @${cleanCall} joined unit "${targetTeam.name}" (${targetTeam.inviteCode})`);
@@ -793,7 +1607,7 @@ app.post('/api/teams/join', (req, res) => {
 });
 
 // 4. Leave team
-app.post('/api/teams/leave', (req, res) => {
+app.post('/api/teams/leave', async (req, res) => {
   const { callSign } = req.body;
   if (!callSign) {
     res.status(400).json({ success: false, error: 'callSign is required.' });
@@ -826,6 +1640,18 @@ app.post('/api/teams/leave', (req, res) => {
   }
 
   saveTeams(allTeams);
+
+  // Supabase sync for departure
+  if (supabaseAdmin) {
+    try {
+      const { data: prof } = await supabaseAdmin.from('profiles').select('id').ilike('username', cleanCall).maybeSingle();
+      if (prof) {
+        await supabaseAdmin.from('participant_members').update({ left_at: new Date().toISOString() }).eq('user_id', prof.id).is('left_at', null);
+      }
+    } catch (sbErr) {
+      console.warn('[server] Supabase team departure sync notice:', sbErr);
+    }
+  }
 
   console.info(`[TEAMS] @${cleanCall} departed unit "${targetTeam.name}". Reverted to solo operative.`);
 
@@ -997,88 +1823,145 @@ app.get('/api/leaderboard', async (req, res) => {
   }
 
   let candidates: LeaderboardEntryDTO[] = [];
+  const processedCallSigns = new Set<string>();
 
-  // 1. Process Teams
-  if (kindFilter === 'all' || kindFilter === 'team') {
-    for (const team of allTeams) {
-      if (team.retired) continue;
+  // 1. Fetch real eligible participants from Supabase if available
+  if (supabaseAdmin) {
+    try {
+      const { data: parts, error: pErr } = await supabaseAdmin
+        .from('participants')
+        .select(`
+          id,
+          kind,
+          name,
+          solo_user_id,
+          exclude_from_leaderboard,
+          retired,
+          created_at,
+          participant_members (
+            user_id,
+            left_at,
+            profiles:user_id (
+              id,
+              username,
+              full_name,
+              student_class,
+              admission_masked
+            )
+          ),
+          participant_stage_overrides (
+            enabled
+          )
+        `)
+        .eq('retired', false);
 
-      // Only exclude team if all members are staff or explicitly marked excluded by staff
-      const isTeamExcluded = team.members.length > 0 && team.members.every((m) => {
-        const mc = m.callSign.toLowerCase();
-        return (
-          Boolean(overrides[mc]?.excludeFromLeaderboard) ||
-          Boolean(scores[mc]?.excludeFromLeaderboard) ||
-          Boolean(scores[mc]?.isStaff)
-        );
-      });
+      if (!pErr && Array.isArray(parts)) {
+        const { data: allComps } = await supabaseAdmin
+          .from('stage_completions')
+          .select('participant_id, stage_id, points_earned');
 
-      if (isTeamExcluded) continue;
+        const solvesMap = new Map<string, number>();
+        const compsMap = new Map<string, number>();
+        allComps?.forEach((c: any) => {
+          solvesMap.set(c.participant_id, (solvesMap.get(c.participant_id) || 0) + (c.points_earned || 0));
+          compsMap.set(c.participant_id, Math.max(compsMap.get(c.participant_id) || 0, c.stage_id || 0));
+        });
 
-      // Calculate aggregate team score and stages completed (highest completed stage among active members)
-      let maxScore = 0;
-      let maxStages = 0;
-      let latestProgress: string | null = null;
-      let teamClasses: string[] = [];
+        for (const p of parts) {
+          const hasOverride = Boolean(
+            p.participant_stage_overrides?.enabled ||
+            (Array.isArray(p.participant_stage_overrides) && p.participant_stage_overrides.some((o: any) => o.enabled))
+          );
 
-      for (const member of team.members) {
-        const pScore = scores[member.callSign.toLowerCase()];
-        if (pScore) {
-          if (pScore.score > maxScore) maxScore = pScore.score;
-          if (pScore.stagesCompleted > maxStages) maxStages = pScore.stagesCompleted;
-          if (pScore.lastProgress) {
-            if (!latestProgress || new Date(pScore.lastProgress) > new Date(latestProgress)) {
-              latestProgress = pScore.lastProgress;
-            }
+          const activeMembers = (p.participant_members || [])
+            .filter((m: any) => !m.left_at)
+            .map((m: any) => m.profiles)
+            .filter(Boolean);
+
+          const firstProfile = activeMembers[0];
+          const username = (p.kind === 'team' ? p.name : firstProfile?.username) || 'Unknown';
+          const callKey = (firstProfile?.username || username).toLowerCase().trim();
+
+          const isDev = callKey.includes('rudrapratapj') || callKey.includes('rudrapratapf');
+          const isExcluded = Boolean(
+            p.exclude_from_leaderboard ||
+            hasOverride ||
+            isDev ||
+            overrides[callKey]?.excludeFromLeaderboard ||
+            scores[callKey]?.excludeFromLeaderboard ||
+            scores[callKey]?.hasStageOverride
+          );
+
+          // Skip testing/admin accounts with overrides or exclusion flags
+          if (isExcluded) continue;
+
+          // Merge score from DB solves or live client sync
+          const dbScore = solvesMap.get(p.id) || 0;
+          const liveScore = scores[callKey]?.score || 0;
+          const finalScore = Math.max(dbScore, liveScore);
+
+          const dbStages = compsMap.get(p.id) || 0;
+          const liveStages = scores[callKey]?.stagesCompleted || 0;
+          const finalStages = Math.max(dbStages, liveStages);
+
+          const userClass = firstProfile?.student_class || scores[callKey]?.studentClass || 'Class 9';
+
+          if (classFilter && classFilter !== 'all' && userClass !== classFilter) {
+            continue;
           }
-          if (pScore.studentClass && !teamClasses.includes(pScore.studentClass)) {
-            teamClasses.push(pScore.studentClass);
+
+          if (p.kind === 'team' && (kindFilter === 'all' || kindFilter === 'team')) {
+            candidates.push({
+              rank: 0,
+              name: p.name || 'Tactical Team',
+              kind: 'team',
+              score: finalScore,
+              stagesCompleted: finalStages,
+              currentStage: Math.min(7, finalStages + 1),
+              completionPercentage: Math.round((finalStages / 7) * 100),
+              lastProgress: scores[callKey]?.lastProgress || p.created_at,
+              studentClass: userClass,
+              members: activeMembers.map((m: any) => m.username),
+              teamSize: activeMembers.length,
+            });
+          } else if (p.kind === 'solo' && (kindFilter === 'all' || kindFilter === 'solo')) {
+            candidates.push({
+              rank: 0,
+              name: firstProfile?.username || 'Operative',
+              kind: 'solo',
+              score: finalScore,
+              stagesCompleted: finalStages,
+              currentStage: Math.min(7, finalStages + 1),
+              completionPercentage: Math.round((finalStages / 7) * 100),
+              lastProgress: scores[callKey]?.lastProgress || p.created_at,
+              studentClass: userClass,
+            });
+            processedCallSigns.add(callKey);
           }
         }
       }
-
-      // If class filter is active, match if any member is in that class
-      if (classFilter && classFilter !== 'all' && !teamClasses.includes(classFilter)) {
-        continue;
-      }
-
-      candidates.push({
-        rank: 0,
-        name: team.name,
-        kind: 'team',
-        score: maxScore,
-        stagesCompleted: maxStages,
-        currentStage: Math.min(7, maxStages + 1),
-        completionPercentage: Math.round((maxStages / 7) * 100),
-        lastProgress: latestProgress || team.createdAt,
-        studentClass: teamClasses.join(', ') || undefined,
-        members: team.members.map((m) => m.callSign),
-        teamSize: team.members.length,
-      });
+    } catch (sbErr) {
+      console.warn('[server] Supabase leaderboard aggregation notice:', sbErr);
     }
   }
 
-  // 2. Process Solo Operatives
-  if (kindFilter === 'all' || kindFilter === 'solo') {
+  // 2. Offline Fallback ONLY: Process purely local scores when Supabase is disconnected
+  if (!supabaseAdmin && (kindFilter === 'all' || kindFilter === 'solo')) {
     for (const [key, pScore] of Object.entries(scores)) {
-      // Exclude if already in an active team
-      if (pScore.teamName) {
-        const inActiveTeam = allTeams.some(
-          (t) => !t.retired && t.members.some((m) => m.callSign.toLowerCase() === key)
-        );
-        if (inActiveTeam) continue;
-      }
+      if (processedCallSigns.has(key)) continue;
 
-      // Exclusion check: only exclude if explicitly marked excludeFromLeaderboard or staff
       if (
-        Boolean(pScore.excludeFromLeaderboard) ||
-        Boolean(pScore.isStaff) ||
-        Boolean(overrides[key]?.excludeFromLeaderboard)
+        pScore.excludeFromLeaderboard ||
+        pScore.hasStageOverride ||
+        pScore.isStaff ||
+        overrides[key]?.excludeFromLeaderboard ||
+        (overrides[key]?.stages && Object.keys(overrides[key].stages).length > 0) ||
+        key === 'rudrapratapj.0562@gmail.com' ||
+        key === 'rudrapratapf.0562@gmail.com'
       ) {
         continue;
       }
 
-      // Class filter check
       if (classFilter && classFilter !== 'all' && pScore.studentClass !== classFilter) {
         continue;
       }
@@ -1119,6 +2002,767 @@ app.get('/api/leaderboard', async (req, res) => {
     total: ranked.length,
     entries: ranked,
   });
+});
+
+/* =========================================================================
+   STAFF-TO-PLAYER COMMUNICATIONS SYSTEM (Announcements & Private Messages)
+   ========================================================================= */
+
+const COMMUNICATIONS_FILE = path.join(DATA_DIR, 'communications.json');
+
+interface CommunicationsStore {
+  announcements: Array<{
+    id: string;
+    title: string;
+    message: string;
+    targetType: 'all' | 'stage' | 'team' | 'player';
+    targetValue?: string;
+    createdBy: string;
+    createdAt: string;
+    pinned?: boolean;
+  }>;
+  conversations: Array<{
+    id: string;
+    playerCallSign: string;
+    playerName: string;
+    playerStudentClass?: string;
+    status: 'open' | 'resolved';
+    unreadStaffCount: number;
+    unreadPlayerCount: number;
+    lastMessage?: string;
+    lastMessageAt: string;
+    createdAt: string;
+    updatedAt: string;
+    messages: Array<{
+      id: string;
+      conversationId: string;
+      senderType: 'staff' | 'player';
+      senderCallSign: string;
+      senderName: string;
+      message: string;
+      readByStaff: boolean;
+      readByPlayer: boolean;
+      createdAt: string;
+    }>;
+  }>;
+}
+
+function loadCommunications(): CommunicationsStore {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(COMMUNICATIONS_FILE)) {
+      return JSON.parse(fs.readFileSync(COMMUNICATIONS_FILE, 'utf-8'));
+    }
+  } catch (err) {
+    console.error('[server] Error reading communications file:', err);
+  }
+  return {
+    announcements: [
+      {
+        id: 'ann-init-01',
+        title: 'Operations Desk: Welcome to Case TLS-0017',
+        message: 'All student investigators: Review the First Directive classified case files. Ensure your call-sign registration is logged. Case sectors unlock on the scheduled IST timetable.',
+        targetType: 'all',
+        createdBy: 'DIRECTOR OF INVESTIGATION',
+        createdAt: '2026-10-30T00:00:00.000Z',
+        pinned: true,
+      },
+    ],
+    conversations: [],
+  };
+}
+
+function saveCommunications(store: CommunicationsStore) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(COMMUNICATIONS_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[server] Error saving communications file:', err);
+  }
+}
+
+// 1. Player: Get eligible announcements
+app.get('/api/communications/announcements', async (req, res) => {
+  const callSign = (req.query.callSign as string || '').toLowerCase().trim();
+  const stage = Number(req.query.stage) || 1;
+  const team = (req.query.team as string || '').toLowerCase().trim();
+
+  const store = loadCommunications();
+
+  // Try Supabase if configured
+  if (supabaseAdmin) {
+    try {
+      const { data: dbAnnouncements } = await supabaseAdmin
+        .from('announcements')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (Array.isArray(dbAnnouncements) && dbAnnouncements.length > 0) {
+        const filtered = dbAnnouncements.filter((a: any) => {
+          if (!a.target_type || a.target_type === 'all') return true;
+          if (a.target_type === 'stage' && String(a.target_value) === String(stage)) return true;
+          if (a.target_type === 'team' && team && a.target_value?.toLowerCase() === team) return true;
+          if (a.target_type === 'player' && callSign && a.target_value?.toLowerCase() === callSign) return true;
+          return false;
+        }).map((a: any) => ({
+          id: a.id,
+          title: a.title,
+          message: a.message,
+          targetType: a.target_type,
+          targetValue: a.target_value,
+          createdBy: a.created_by || 'Operations Command',
+          createdAt: a.created_at,
+          pinned: Boolean(a.pinned),
+        }));
+
+        res.json({ success: true, announcements: filtered });
+        return;
+      }
+    } catch (sbErr) {
+      console.warn('[server] Supabase announcements query warning:', sbErr);
+    }
+  }
+
+  // Fallback to local store
+  const filtered = store.announcements.filter((a) => {
+    if (!a.targetType || a.targetType === 'all') return true;
+    if (a.targetType === 'stage' && String(a.targetValue) === String(stage)) return true;
+    if (a.targetType === 'team' && team && a.targetValue?.toLowerCase() === team) return true;
+    if (a.targetType === 'player' && callSign && a.targetValue?.toLowerCase() === callSign) return true;
+    return false;
+  });
+
+  res.json({ success: true, announcements: filtered });
+});
+
+// 2. Staff: List all announcements
+app.get('/api/staff/announcements', requireStaffAuth, async (_req, res) => {
+  const store = loadCommunications();
+  if (supabaseAdmin) {
+    try {
+      const { data: dbAnnouncements } = await supabaseAdmin
+        .from('announcements')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (Array.isArray(dbAnnouncements) && dbAnnouncements.length > 0) {
+        const mapped = dbAnnouncements.map((a: any) => ({
+          id: a.id,
+          title: a.title,
+          message: a.message,
+          targetType: a.target_type,
+          targetValue: a.target_value,
+          createdBy: a.created_by,
+          createdAt: a.created_at,
+          pinned: Boolean(a.pinned),
+        }));
+        res.json({ success: true, announcements: mapped });
+        return;
+      }
+    } catch {}
+  }
+  res.json({ success: true, announcements: store.announcements });
+});
+
+// 3. Staff: Post announcement
+app.post('/api/staff/announcements', requireStaffAuth, async (req, res) => {
+  const { title, message, targetType = 'all', targetValue, pinned = false } = req.body;
+  if (!title || !message) {
+    res.status(400).json({ success: false, error: 'Announcement title and message are required.' });
+    return;
+  }
+
+  const store = loadCommunications();
+  const nowIso = new Date().toISOString();
+  const newAnn = {
+    id: `ann_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+    title: String(title).trim(),
+    message: String(message).trim(),
+    targetType: targetType as 'all' | 'stage' | 'team' | 'player',
+    targetValue: targetValue ? String(targetValue).trim() : undefined,
+    createdBy: 'STAFF OPERATIONS DESK',
+    createdAt: nowIso,
+    pinned: Boolean(pinned),
+  };
+
+  store.announcements.unshift(newAnn);
+  saveCommunications(store);
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin.from('announcements').insert({
+        id: newAnn.id,
+        title: newAnn.title,
+        message: newAnn.message,
+        target_type: newAnn.targetType,
+        target_value: newAnn.targetValue || null,
+        created_by: newAnn.createdBy,
+        created_at: nowIso,
+        pinned: newAnn.pinned,
+      });
+    } catch (sbErr) {
+      console.warn('[server] Supabase announcement insert warning:', sbErr);
+    }
+  }
+
+  res.json({ success: true, announcement: newAnn });
+});
+
+// 4. Staff: Delete announcement
+app.delete('/api/staff/announcements/:id', requireStaffAuth, async (req, res) => {
+  const { id } = req.params;
+  const store = loadCommunications();
+  store.announcements = store.announcements.filter((a) => a.id !== id);
+  saveCommunications(store);
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin.from('announcements').delete().eq('id', id);
+    } catch {}
+  }
+  res.json({ success: true });
+});
+
+// 5. Staff: List all conversations (Inbox)
+app.get('/api/staff/conversations', requireStaffAuth, async (_req, res) => {
+  const store = loadCommunications();
+
+  if (supabaseAdmin) {
+    try {
+      const { data: dbConv } = await supabaseAdmin
+        .from('staff_conversations')
+        .select(`
+          id,
+          player_callsign,
+          player_name,
+          player_student_class,
+          status,
+          unread_staff_count,
+          unread_player_count,
+          last_message,
+          last_message_at,
+          created_at,
+          updated_at
+        `)
+        .order('last_message_at', { ascending: false });
+
+      if (Array.isArray(dbConv) && dbConv.length > 0) {
+        const mapped = dbConv.map((c: any) => ({
+          id: c.id,
+          playerCallSign: c.player_callsign,
+          playerName: c.player_name,
+          playerStudentClass: c.player_student_class,
+          status: c.status,
+          unreadStaffCount: c.unread_staff_count || 0,
+          unreadPlayerCount: c.unread_player_count || 0,
+          lastMessage: c.last_message,
+          lastMessageAt: c.last_message_at || c.updated_at,
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+        }));
+        res.json({ success: true, conversations: mapped });
+        return;
+      }
+    } catch {}
+  }
+
+  const mapped = store.conversations.map((c) => ({
+    id: c.id,
+    playerCallSign: c.playerCallSign,
+    playerName: c.playerName,
+    playerStudentClass: c.playerStudentClass,
+    status: c.status,
+    unreadStaffCount: c.unreadStaffCount,
+    unreadPlayerCount: c.unreadPlayerCount,
+    lastMessage: c.lastMessage,
+    lastMessageAt: c.lastMessageAt,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  }));
+
+  res.json({ success: true, conversations: mapped });
+});
+
+// 6. Staff: Get conversation messages
+app.get('/api/staff/conversations/:id/messages', requireStaffAuth, async (req, res) => {
+  const { id } = req.params;
+  const store = loadCommunications();
+
+  if (supabaseAdmin) {
+    try {
+      const { data: msgs } = await supabaseAdmin
+        .from('staff_conversation_messages')
+        .select('*')
+        .eq('conversation_id', id)
+        .order('created_at', { ascending: true });
+
+      if (Array.isArray(msgs)) {
+        // Mark as read by staff
+        await supabaseAdmin
+          .from('staff_conversation_messages')
+          .update({ read_by_staff: true })
+          .eq('conversation_id', id)
+          .eq('read_by_staff', false);
+
+        await supabaseAdmin
+          .from('staff_conversations')
+          .update({ unread_staff_count: 0 })
+          .eq('id', id);
+
+        const mapped = msgs.map((m: any) => ({
+          id: m.id,
+          conversationId: m.conversation_id,
+          senderType: m.sender_type,
+          senderCallSign: m.sender_callsign,
+          senderName: m.sender_name,
+          message: m.message,
+          readByStaff: true,
+          readByPlayer: m.read_by_player,
+          createdAt: m.created_at,
+        }));
+
+        res.json({ success: true, messages: mapped });
+        return;
+      }
+    } catch {}
+  }
+
+  const conv = store.conversations.find((c) => c.id === id);
+  if (!conv) {
+    res.status(404).json({ success: false, error: 'Conversation not found.' });
+    return;
+  }
+
+  conv.unreadStaffCount = 0;
+  conv.messages.forEach((m) => {
+    m.readByStaff = true;
+  });
+  saveCommunications(store);
+
+  res.json({ success: true, messages: conv.messages });
+});
+
+// 7. Staff: Start or open conversation with a player
+app.post('/api/staff/conversations/start', requireStaffAuth, async (req, res) => {
+  const { playerCallSign } = req.body;
+  if (!playerCallSign) {
+    res.status(400).json({ success: false, error: 'playerCallSign is required.' });
+    return;
+  }
+
+  const cleanCall = String(playerCallSign).trim();
+  const store = loadCommunications();
+  let existing = store.conversations.find(
+    (c) => c.playerCallSign.toLowerCase() === cleanCall.toLowerCase()
+  );
+
+  let playerName = cleanCall;
+  let playerClass = 'Class 9';
+
+  if (supabaseAdmin) {
+    try {
+      const { data: prof } = await supabaseAdmin
+        .from('profiles')
+        .select('username, full_name, student_class')
+        .ilike('username', cleanCall)
+        .maybeSingle();
+
+      if (prof) {
+        playerName = prof.full_name || prof.username;
+        playerClass = prof.student_class || 'Class 9';
+      }
+
+      // Check Supabase conversation
+      const { data: sbConv } = await supabaseAdmin
+        .from('staff_conversations')
+        .select('*')
+        .ilike('player_callsign', cleanCall)
+        .maybeSingle();
+
+      if (sbConv) {
+        res.json({
+          success: true,
+          conversation: {
+            id: sbConv.id,
+            playerCallSign: sbConv.player_callsign,
+            playerName: sbConv.player_name,
+            playerStudentClass: sbConv.player_student_class,
+            status: sbConv.status,
+            unreadStaffCount: sbConv.unread_staff_count || 0,
+            unreadPlayerCount: sbConv.unread_player_count || 0,
+            lastMessage: sbConv.last_message,
+            lastMessageAt: sbConv.last_message_at,
+            createdAt: sbConv.created_at,
+            updatedAt: sbConv.updated_at,
+          },
+        });
+        return;
+      }
+    } catch {}
+  }
+
+  if (existing) {
+    res.json({ success: true, conversation: existing });
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const newConvId = `conv_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+  const newConv = {
+    id: newConvId,
+    playerCallSign: cleanCall,
+    playerName,
+    playerStudentClass: playerClass,
+    status: 'open' as const,
+    unreadStaffCount: 0,
+    unreadPlayerCount: 0,
+    lastMessage: 'Conversation opened by Staff Operations.',
+    lastMessageAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    messages: [
+      {
+        id: `msg_${Date.now()}_init`,
+        conversationId: newConvId,
+        senderType: 'staff' as const,
+        senderCallSign: 'OPERATIONS',
+        senderName: 'Staff Operations Command',
+        message: 'Tactical channel established with Staff Operations. How can we assist your investigation?',
+        readByStaff: true,
+        readByPlayer: false,
+        createdAt: nowIso,
+      },
+    ],
+  };
+
+  store.conversations.unshift(newConv);
+  saveCommunications(store);
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin.from('staff_conversations').insert({
+        id: newConv.id,
+        player_callsign: newConv.playerCallSign,
+        player_name: newConv.playerName,
+        player_student_class: newConv.playerStudentClass,
+        status: newConv.status,
+        unread_staff_count: 0,
+        unread_player_count: 1,
+        last_message: newConv.lastMessage,
+        last_message_at: nowIso,
+        created_at: nowIso,
+        updated_at: nowIso,
+      });
+
+      await supabaseAdmin.from('staff_conversation_messages').insert({
+        id: newConv.messages[0].id,
+        conversation_id: newConv.id,
+        sender_type: 'staff',
+        sender_callsign: 'OPERATIONS',
+        sender_name: 'Staff Operations Command',
+        message: newConv.messages[0].message,
+        read_by_staff: true,
+        read_by_player: false,
+        created_at: nowIso,
+      });
+    } catch {}
+  }
+
+  res.json({ success: true, conversation: newConv });
+});
+
+// 8. Staff: Post message to conversation
+app.post('/api/staff/conversations/:id/message', requireStaffAuth, async (req, res) => {
+  const { id } = req.params;
+  const { message } = req.body;
+  if (!message || !String(message).trim()) {
+    res.status(400).json({ success: false, error: 'Message content is required.' });
+    return;
+  }
+
+  const cleanMsg = String(message).trim();
+  const nowIso = new Date().toISOString();
+  const store = loadCommunications();
+  const conv = store.conversations.find((c) => c.id === id);
+
+  const newMsg = {
+    id: `msg_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+    conversationId: id,
+    senderType: 'staff' as const,
+    senderCallSign: 'OPERATIONS',
+    senderName: 'Staff Operations Desk',
+    message: cleanMsg,
+    readByStaff: true,
+    readByPlayer: false,
+    createdAt: nowIso,
+  };
+
+  if (conv) {
+    conv.messages.push(newMsg);
+    conv.lastMessage = cleanMsg;
+    conv.lastMessageAt = nowIso;
+    conv.updatedAt = nowIso;
+    conv.unreadPlayerCount = (conv.unreadPlayerCount || 0) + 1;
+    saveCommunications(store);
+  }
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin.from('staff_conversation_messages').insert({
+        id: newMsg.id,
+        conversation_id: id,
+        sender_type: 'staff',
+        sender_callsign: 'OPERATIONS',
+        sender_name: 'Staff Operations Desk',
+        message: cleanMsg,
+        read_by_staff: true,
+        read_by_player: false,
+        created_at: nowIso,
+      });
+
+      await supabaseAdmin
+        .from('staff_conversations')
+        .update({
+          last_message: cleanMsg,
+          last_message_at: nowIso,
+          updated_at: nowIso,
+        })
+        .eq('id', id);
+    } catch {}
+  }
+
+  res.json({ success: true, message: newMsg });
+});
+
+// 9. Staff: Update conversation status (open / resolved)
+app.post('/api/staff/conversations/:id/status', requireStaffAuth, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  if (status !== 'open' && status !== 'resolved') {
+    res.status(400).json({ success: false, error: 'Status must be "open" or "resolved".' });
+    return;
+  }
+
+  const store = loadCommunications();
+  const conv = store.conversations.find((c) => c.id === id);
+  if (conv) {
+    conv.status = status;
+    conv.updatedAt = new Date().toISOString();
+    saveCommunications(store);
+  }
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin
+        .from('staff_conversations')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id);
+    } catch {}
+  }
+
+  res.json({ success: true, status });
+});
+
+// 10. Player: Fetch conversation and messages
+app.get('/api/communications/conversation', async (req, res) => {
+  const callSign = (req.query.callSign as string || '').trim();
+  if (!callSign) {
+    res.status(400).json({ success: false, error: 'callSign is required.' });
+    return;
+  }
+
+  const cleanCall = callSign.toLowerCase();
+  const store = loadCommunications();
+
+  if (supabaseAdmin) {
+    try {
+      const { data: sbConv } = await supabaseAdmin
+        .from('staff_conversations')
+        .select('*')
+        .ilike('player_callsign', cleanCall)
+        .maybeSingle();
+
+      if (sbConv) {
+        const { data: msgs } = await supabaseAdmin
+          .from('staff_conversation_messages')
+          .select('*')
+          .eq('conversation_id', sbConv.id)
+          .order('created_at', { ascending: true });
+
+        const mappedMsgs = (msgs || []).map((m: any) => ({
+          id: m.id,
+          conversationId: m.conversation_id,
+          senderType: m.sender_type,
+          senderCallSign: m.sender_callsign,
+          senderName: m.sender_name,
+          message: m.message,
+          readByStaff: m.read_by_staff,
+          readByPlayer: m.read_by_player,
+          createdAt: m.created_at,
+        }));
+
+        res.json({
+          success: true,
+          conversation: {
+            id: sbConv.id,
+            playerCallSign: sbConv.player_callsign,
+            playerName: sbConv.player_name,
+            playerStudentClass: sbConv.player_student_class,
+            status: sbConv.status,
+            unreadStaffCount: sbConv.unread_staff_count || 0,
+            unreadPlayerCount: sbConv.unread_player_count || 0,
+            lastMessage: sbConv.last_message,
+            lastMessageAt: sbConv.last_message_at,
+            createdAt: sbConv.created_at,
+            updatedAt: sbConv.updated_at,
+          },
+          messages: mappedMsgs,
+        });
+        return;
+      }
+    } catch {}
+  }
+
+  const conv = store.conversations.find((c) => c.playerCallSign.toLowerCase() === cleanCall);
+  if (!conv) {
+    res.json({ success: true, conversation: null, messages: [] });
+    return;
+  }
+
+  res.json({ success: true, conversation: conv, messages: conv.messages });
+});
+
+// 11. Player: Send reply message to staff
+app.post('/api/communications/message', async (req, res) => {
+  const { callSign, fullName, studentClass = 'Class 9', message } = req.body;
+  if (!callSign || !message || !String(message).trim()) {
+    res.status(400).json({ success: false, error: 'callSign and message are required.' });
+    return;
+  }
+
+  const cleanCall = String(callSign).trim();
+  const cleanMsg = String(message).trim();
+  const nowIso = new Date().toISOString();
+  const store = loadCommunications();
+
+  let conv = store.conversations.find((c) => c.playerCallSign.toLowerCase() === cleanCall.toLowerCase());
+  let convId = conv?.id;
+
+  if (!conv) {
+    convId = `conv_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+    conv = {
+      id: convId,
+      playerCallSign: cleanCall,
+      playerName: String(fullName || cleanCall).trim(),
+      playerStudentClass: String(studentClass).trim(),
+      status: 'open',
+      unreadStaffCount: 1,
+      unreadPlayerCount: 0,
+      lastMessage: cleanMsg,
+      lastMessageAt: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      messages: [],
+    };
+    store.conversations.unshift(conv);
+  }
+
+  const newMsg = {
+    id: `msg_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+    conversationId: convId!,
+    senderType: 'player' as const,
+    senderCallSign: cleanCall,
+    senderName: String(fullName || cleanCall).trim(),
+    message: cleanMsg,
+    readByStaff: false,
+    readByPlayer: true,
+    createdAt: nowIso,
+  };
+
+  conv.messages.push(newMsg);
+  conv.lastMessage = cleanMsg;
+  conv.lastMessageAt = nowIso;
+  conv.updatedAt = nowIso;
+  conv.unreadStaffCount = (conv.unreadStaffCount || 0) + 1;
+  saveCommunications(store);
+
+  if (supabaseAdmin) {
+    try {
+      // Upsert conversation row
+      await supabaseAdmin.from('staff_conversations').upsert({
+        id: convId,
+        player_callsign: cleanCall,
+        player_name: String(fullName || cleanCall).trim(),
+        player_student_class: String(studentClass).trim(),
+        status: 'open',
+        last_message: cleanMsg,
+        last_message_at: nowIso,
+        updated_at: nowIso,
+      }, { onConflict: 'id' });
+
+      // Insert message
+      await supabaseAdmin.from('staff_conversation_messages').insert({
+        id: newMsg.id,
+        conversation_id: convId,
+        sender_type: 'player',
+        sender_callsign: cleanCall,
+        sender_name: String(fullName || cleanCall).trim(),
+        message: cleanMsg,
+        read_by_staff: false,
+        read_by_player: true,
+        created_at: nowIso,
+      });
+    } catch (sbErr) {
+      console.warn('[server] Supabase player message insert notice:', sbErr);
+    }
+  }
+
+  res.json({ success: true, message: newMsg });
+});
+
+// 12. Player: Mark messages as read
+app.post('/api/communications/read', async (req, res) => {
+  const { callSign } = req.body;
+  if (!callSign) {
+    res.json({ success: true });
+    return;
+  }
+
+  const cleanCall = String(callSign).trim().toLowerCase();
+  const store = loadCommunications();
+  const conv = store.conversations.find((c) => c.playerCallSign.toLowerCase() === cleanCall);
+
+  if (conv) {
+    conv.unreadPlayerCount = 0;
+    conv.messages.forEach((m) => {
+      m.readByPlayer = true;
+    });
+    saveCommunications(store);
+  }
+
+  if (supabaseAdmin) {
+    try {
+      const { data: sbConv } = await supabaseAdmin
+        .from('staff_conversations')
+        .select('id')
+        .ilike('player_callsign', cleanCall)
+        .maybeSingle();
+
+      if (sbConv) {
+        await supabaseAdmin
+          .from('staff_conversation_messages')
+          .update({ read_by_player: true })
+          .eq('conversation_id', sbConv.id)
+          .eq('read_by_player', false);
+
+        await supabaseAdmin
+          .from('staff_conversations')
+          .update({ unread_player_count: 0 })
+          .eq('id', sbConv.id);
+      }
+    } catch {}
+  }
+
+  res.json({ success: true });
 });
 
 /* =========================================================================

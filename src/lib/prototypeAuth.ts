@@ -308,7 +308,6 @@ export function getUserProgress(callSign: string): UserProgress {
  * Save progress for a specific user
  */
 export function saveUserProgress(progress: UserProgress): void {
-  if (typeof window === 'undefined' || !window.localStorage) return;
   try {
     localStorage.setItem(
       PROGRESS_PREFIX + progress.callSign.toLowerCase(),

@@ -1,0 +1,61 @@
+{
+  "announcements": [
+    {
+      "id": "ann_1793722875919_f50ceb",
+      "title": "Case TLS-0017 Operational Directive",
+      "message": "All field investigators: Archive Sector 01 has been declassified. Inspect the six baseline case files and cross-reference with EV-0103.",
+      "targetType": "all",
+      "createdBy": "STAFF OPERATIONS DESK",
+      "createdAt": "2026-11-03T16:21:15.919Z",
+      "pinned": true
+    },
+    {
+      "id": "ann-init-01",
+      "title": "Operations Desk: Welcome to Case TLS-0017",
+      "message": "All student investigators: Review the First Directive classified case files. Ensure your call-sign registration is logged. Case sectors unlock on the scheduled IST timetable.",
+      "targetType": "all",
+      "createdBy": "DIRECTOR OF INVESTIGATION",
+      "createdAt": "2026-10-30T00:00:00.000Z",
+      "pinned": true
+    }
+  ],
+  "conversations": [
+    {
+      "id": "conv_1793722887253_03f379",
+      "playerCallSign": "cipher_echo",
+      "playerName": "Alex Mercer",
+      "playerStudentClass": "Class 10-A",
+      "status": "open",
+      "unreadStaffCount": 2,
+      "unreadPlayerCount": 1,
+      "lastMessage": "Investigator Echo: Affirmative. The password sheet contains historical directory keys that cross-reference with ARC-002.",
+      "lastMessageAt": "2026-11-03T16:21:44.545Z",
+      "createdAt": "2026-11-03T16:21:27.253Z",
+      "updatedAt": "2026-11-03T16:21:44.545Z",
+      "messages": [
+        {
+          "id": "msg_1793722887253_947a32",
+          "conversationId": "conv_1793722887253_03f379",
+          "senderType": "player",
+          "senderCallSign": "cipher_echo",
+          "senderName": "Alex Mercer",
+          "message": "Reporting in: Is the 1969 Password Sheet connected to the Exorcist cipher?",
+          "readByStaff": false,
+          "readByPlayer": true,
+          "createdAt": "2026-11-03T16:21:27.253Z"
+        },
+        {
+          "id": "msg_1793722904545_a20f2b",
+          "conversationId": "conv_1793722887253_03f379",
+          "senderType": "staff",
+          "senderCallSign": "OPERATIONS",
+          "senderName": "Staff Operations Desk",
+          "message": "Investigator Echo: Affirmative. The password sheet contains historical directory keys that cross-reference with ARC-002.",
+          "readByStaff": true,
+          "readByPlayer": false,
+          "createdAt": "2026-11-03T16:21:44.545Z"
+        }
+      ]
+    }
+  ]
+}

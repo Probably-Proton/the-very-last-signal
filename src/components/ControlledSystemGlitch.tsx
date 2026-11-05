@@ -151,8 +151,9 @@ export const ControlledSystemGlitch: React.FC<ControlledSystemGlitchProps> = ({
           if (hasFinishedRef.current) return;
           if (currentErr < FLASH_ERRORS.length) {
             setErrorIndex(currentErr);
-            // Play coordinated layered corruption burst for each error
-            tacticalAudio.playLayeredDigitalCorruption(0.42, 0.85);
+            // Play coordinated high-pitched electronic burst (~180ms) followed by silence and repetition
+            tacticalAudio.playGlitchHighPitchedBeepBurst(2800 + currentErr * 120, 0.18);
+            tacticalAudio.playLayeredDigitalCorruption(0.35, 0.7);
 
             setJitter({
               x: (Math.random() - 0.5) * 22,

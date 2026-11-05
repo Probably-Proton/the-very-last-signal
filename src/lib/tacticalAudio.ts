@@ -1162,6 +1162,81 @@ class TacticalAudioController {
   }
 
   /**
+   * Short high-pitched electronic glitch pulse (~180ms) followed by silence.
+   * Designed for repetition during tactical glitch error alerts.
+   * Fully tracked in activeGlitchNodes and protected against autoplay restrictions.
+   */
+  public playGlitchHighPitchedBeepBurst(freq = 2950, duration = 0.18): void {
+    if (this.sfxMuted) return;
+    this.resumeContext();
+    if (!this.ctx || !this.sfxGain) return;
+
+    try {
+      const t = this.ctx.currentTime;
+      const dur = Math.max(0.08, Math.min(0.35, duration));
+
+      const oscPrimary = this.ctx.createOscillator();
+      const oscHarmonic = this.ctx.createOscillator();
+      const gainPrimary = this.ctx.createGain();
+      const gainHarmonic = this.ctx.createGain();
+      const masterPulseGain = this.ctx.createGain();
+
+      // Sharp high-pitched tone with subtle frequency modulation
+      oscPrimary.type = 'sine';
+      oscPrimary.frequency.setValueAtTime(freq, t);
+      oscPrimary.frequency.exponentialRampToValueAtTime(freq * 1.08, t + dur * 0.4);
+      oscPrimary.frequency.exponentialRampToValueAtTime(freq * 0.95, t + dur);
+
+      // Higher electronic overtone
+      oscHarmonic.type = 'triangle';
+      oscHarmonic.frequency.setValueAtTime(freq * 2, t);
+      oscHarmonic.frequency.exponentialRampToValueAtTime(freq * 2.12, t + dur * 0.5);
+
+      // Gain envelopes: fast attack, crisp cutoff
+      gainPrimary.gain.setValueAtTime(0.001, t);
+      gainPrimary.gain.linearRampToValueAtTime(0.24, t + 0.006);
+      gainPrimary.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+      gainHarmonic.gain.setValueAtTime(0.001, t);
+      gainHarmonic.gain.linearRampToValueAtTime(0.10, t + 0.008);
+      gainHarmonic.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.8);
+
+      masterPulseGain.gain.setValueAtTime(this.sfxVolume * 0.9, t);
+
+      oscPrimary.connect(gainPrimary);
+      oscHarmonic.connect(gainHarmonic);
+      gainPrimary.connect(masterPulseGain);
+      gainHarmonic.connect(masterPulseGain);
+      masterPulseGain.connect(this.sfxGain);
+
+      oscPrimary.start(t);
+      oscHarmonic.start(t);
+      oscPrimary.stop(t + dur + 0.01);
+      oscHarmonic.stop(t + dur + 0.01);
+
+      const tracked = {
+        stop: () => {
+          try {
+            oscPrimary.stop();
+            oscHarmonic.stop();
+            masterPulseGain.disconnect();
+          } catch {}
+        },
+      };
+
+      this.activeGlitchNodes.push(tracked);
+      setTimeout(() => {
+        const idx = this.activeGlitchNodes.indexOf(tracked);
+        if (idx !== -1) {
+          this.activeGlitchNodes.splice(idx, 1);
+        }
+      }, (dur + 0.1) * 1000);
+    } catch {
+      // AudioContext fallback
+    }
+  }
+
+  /**
    * Quiet, dry two-tone alert chime for incoming messages and important announcements.
    */
   public playNotification(): void {

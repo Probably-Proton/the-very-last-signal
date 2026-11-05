@@ -125,7 +125,7 @@ export function DirectorBriefingModal({
             }`}
           >
             <FolderOpen size={13} className="text-emerald-400" />
-            <span>02. First Directive (5 Case Files)</span>
+            <span>02. First Directive (6 Case Files)</span>
           </button>
           <button
             onClick={() => {
@@ -164,10 +164,10 @@ export function DirectorBriefingModal({
               <div className="p-3.5 bg-[#121c15] border border-[#233527] text-xs text-[#a6d8b2] space-y-1">
                 <div className="font-bold text-[#8deb9e] uppercase tracking-wider text-[11px] flex items-center gap-2">
                   <FolderOpen size={14} />
-                  <span>FIRST DIRECTIVE // DECLASSIFIED INCIDENT DOSSIERS (5 FILES)</span>
+                  <span>FIRST DIRECTIVE // DECLASSIFIED INCIDENT DOSSIERS (6 FILES)</span>
                 </div>
                 <p className="text-[11px] text-[#c9e0ce] m-0 font-serif">
-                  Carefully examine these five historic incident records. Both facsimile photographs and verbatim transcripts are provided. Note anomalies and corruptions between draft and standard case files.
+                  Carefully examine these six historic incident records (including the 1969 Password Sheet). Both facsimile photographs and verbatim transcripts are provided. Note anomalies and corruptions between draft and standard case files.
                 </p>
               </div>
               <ClassifiedCaseFilesViewer
@@ -202,10 +202,10 @@ export function DirectorBriefingModal({
               <div className="border border-emerald-900/60 bg-[#0f1b13] p-4 space-y-3">
                 <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase tracking-wider">
                   <FolderOpen size={16} />
-                  <span>THE FIRST DIRECTIVE: 5 DECLASSIFIED CASE DOSSIERS</span>
+                  <span>THE FIRST DIRECTIVE: 6 DECLASSIFIED CASE DOSSIERS</span>
                 </div>
                 <p className="text-[11px] text-[#c9e0ce] leading-relaxed m-0 font-serif">
-                  Before deciphering Archivist's memorandum note EV-0103, inspect the five declassified police overview records (SFPD-1969-1011, SOL-1968-1220 Draft, NAP-1969-0927, SOL-1968-1220 Standard, SOL-1969-0704).
+                  Before deciphering Archivist's memorandum note EV-0103, inspect the six declassified police overview records (SFPD-1969-1011, SOL-1968-1220 Draft, NAP-1969-0927, SOL-1968-1220 Standard, SOL-1969-0704, and ARCH-SFPD-69-1127 Password Sheet).
                 </p>
                 <button
                   onClick={() => {
@@ -215,7 +215,7 @@ export function DirectorBriefingModal({
                   className="button bg-emerald-800 hover:bg-emerald-700 text-white border border-emerald-500 text-xs font-mono font-bold tracking-wider py-2 px-4 flex items-center gap-2 shadow"
                 >
                   <FileText size={14} />
-                  <span>INSPECT 5 CLASSIFIED CASE FILES NOW →</span>
+                  <span>INSPECT 6 CLASSIFIED CASE FILES NOW →</span>
                 </button>
               </div>
             </div>

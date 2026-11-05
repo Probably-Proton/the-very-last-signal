@@ -287,13 +287,15 @@ export function VideoAttachmentViewer({
       {isNearFullscreen && (
         <div className="fixed inset-0 z-[999998] bg-black flex items-center justify-center m-0 p-0 overflow-hidden">
           <video
-            src="/assets/FINAL_REVIEW.mp4"
             autoPlay
             playsInline
             controls
             onEnded={handleVideoEnded}
             className="w-full h-full object-contain bg-black"
-          />
+          >
+            <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
+            <source src="/assets/aistudio/WhatsApp_Video_2026-10-29_at_00.25.05_829df3d2.mp4" type="video/mp4" />
+          </video>
           <button
             type="button"
             onClick={handleExitFullscreen}
@@ -405,20 +407,44 @@ export function VideoAttachmentViewer({
                 ARCHIVAL STREAM 0x17-B DISPATCH INTERRUPTED
               </p>
               <p className="text-xs text-muted-foreground max-w-md">
-                Unable to load local MP4 video file. Inspect permissions or verify file at `/assets/FINAL_REVIEW.mp4`.
+                Archival video asset (FINAL_REVIEW.mp4) was not bundled in the initial archive repository import. You may review the full forensic transcript and expected responses below, then initiate the review sequence.
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setVideoLoadError(false);
-                  if (videoRef.current) {
-                    videoRef.current.load();
-                  }
-                }}
-                className="button button-secondary py-1.5 px-3 text-xs"
-              >
-                Reload Stream
-              </button>
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVideoLoadError(false);
+                    if (videoRef.current) {
+                      videoRef.current.load();
+                    }
+                  }}
+                  className="button button-secondary py-1.5 px-3 text-xs"
+                >
+                  Retry Stream
+                </button>
+                <button
+                  type="button"
+                  onClick={handleInitiateReview}
+                  className="button bg-crimson hover:bg-red-800 text-white py-1.5 px-3 text-xs font-bold tracking-wider"
+                >
+                  Proceed to Review Sequence →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Prominent Center Play Overlay for mobile and desktop click-to-play */}
+          {!isPlaying && !videoLoadError && (
+            <div
+              onClick={handleTogglePlay}
+              className="absolute inset-0 z-15 flex items-center justify-center bg-black/35 hover:bg-black/20 cursor-pointer transition-colors group"
+              role="button"
+              tabIndex={0}
+              aria-label="Play video transmission"
+            >
+              <div className="size-16 rounded-full bg-crimson/90 group-hover:bg-crimson group-hover:scale-110 flex items-center justify-center text-white shadow-[0_0_25px_rgba(230,50,50,0.6)] transition-all">
+                <Play size={28} className="translate-x-0.5" fill="currentColor" />
+              </div>
             </div>
           )}
 
@@ -538,7 +564,7 @@ export function VideoAttachmentViewer({
             <div>
               <strong className="text-foreground">Optical Telemetry Substitution:</strong>
               <p className="text-muted-foreground m-0 mt-0.5">
-                "Anticipated that the operative would convert (CG.GHHGD, -LB.DEG I) to locate House 3893."
+                "Anticipated that the operative would convert the camera negative telemetry to locate the target residence."
               </p>
             </div>
           </div>
@@ -547,7 +573,7 @@ export function VideoAttachmentViewer({
             <div>
               <strong className="text-foreground">The 24-Hour Signal Choice:</strong>
               <p className="text-muted-foreground m-0 mt-0.5">
-                "Anticipated that the operative would reverse the 17-second carrier pulse to select Washington &amp; Cherry."
+                "Anticipated that the operative would reverse the 17-second carrier pulse to select the target signal relay."
               </p>
             </div>
           </div>

@@ -158,12 +158,7 @@ export async function createTeamAction(
           teamCode: code,
         }));
 
-        // Mirror to server
-        fetch('/api/teams/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: cleanName, callSign: user.callSign, fullName: user.fullName }),
-        }).catch(() => {});
+        // Supabase RPC has authoritatively established the unit and participant membership
 
         return {
           success: true,
