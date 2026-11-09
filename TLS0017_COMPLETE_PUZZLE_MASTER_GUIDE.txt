@@ -1,0 +1,774 @@
+====================================================================================================
+CASE TLS-0017: THE LAST SIGNAL — COMPLETE PUZZLE MASTER GUIDE & ADMINISTRATOR ANSWER KEY
+====================================================================================================
+CLASSIFICATION: RESTRICTED // GAME ADMINISTRATORS & ORGANISERS ONLY
+SECURITY NOTICE: DO NOT DISTRIBUTE TO PARTICIPANTS OR PLACE IN PUBLIC-ACCESSIBLE DIRECTORIES.
+CASE EVENT WINDOW: 30 OCTOBER 2026 – 15 NOVEMBER 2026 (INDIAN STANDARD TIME / UTC+05:30)
+APPLICATION: THE LAST SIGNAL (CASE 17 LIVE SCHOOL INVESTIGATION GAME)
+TARGET AUDIENCE: SCHOOL STUDENT INVESTIGATORS (CLASSES 6–12)
+DOCUMENT PURPOSE: AUTHORITATIVE CRYPTOGRAPHIC WALKTHROUGH, EVIDENCE INDEX & NARRATIVE LORE GUIDE
+====================================================================================================
+
+TABLE OF CONTENTS
+----------------------------------------------------------------------------------------------------
+1. EXECUTIVE CASE BRIEFING & ARCHITECTURAL SUMMARY
+2. STAGE-BY-STAGE INVESTIGATION WALKTHROUGH (STAGES 1 TO 7)
+   - Stage 1: The Archive (The Archivist's Letter & Docket Registry)
+   - Stage 2: The Lower Vault (County Records Bay & Negative Telemetry)
+   - Stage 3: The Presidio Witness (Case Testimony & Cartographic Signal Map)
+   - Stage 4: The 47-Second Tape (Dispatch Recording & The 24-Hour Location Challenge)
+   - Stage 5: The Mercer Inquest (Chronicle Report & Restricted Suspect Database)
+   - Stage 6: The Record That Remembered Tomorrow (Incident Report 06-B & Vale Notebook)
+   - Stage 7: The Final Signal & Case Closure (Ending Video Reel, Glitch & Debrief Certificate)
+3. IN-DEPTH PUZZLE SOLUTIONS & CRYPTOGRAPHIC DERIVATIONS
+   - Puzzle 1: Affixed Exorcist Memorandum (Acrostic & Telestich)
+   - Puzzle 2: Camera Telemetry Coordinate Substitution (A=1 ... L=12)
+   - Puzzle 3: Cartographic Map Security Gate (Cadastral House Deduction)
+   - Puzzle 4: The 47-Second Audio Monologue & 17-Second Reversed Frequency Pulse
+   - Puzzle 5: Suspect Database Master Access (Z408 Reopened Synthesis)
+   - Puzzle 6: The Vale Archive Password & Timestamp Contradiction (EV1971 / ECHO)
+   - Puzzle 7: Final Token Synthesis ("THE LAST SIGNAL CAME FROM INSIDE THE ARCHIVE")
+4. COMPLETE EVIDENCE & FORENSIC CLUE INDEX
+5. FINAL INVESTIGATION SOLUTION & COMPLETE NARRATIVE LORE
+   - The Underlying Mystery: What Actually Happened
+   - Character Dossiers & Motives
+   - Comprehensive Chronology (1968–2026)
+   - Thematic & Structural Climax
+6. ADMINISTRATOR QUICK-REFERENCE ANSWER TABLE
+   - Master Answer Matrix
+   - Accepted Input Variations & Normalization Rules
+   - Scoring Engine Breakdown (IST Window, Base Points, Speed Bonuses)
+7. SCRIPT RECONCILIATION & DISCREPANCY AUDIT NOTES
+
+
+====================================================================================================
+1. EXECUTIVE CASE BRIEFING & ARCHITECTURAL SUMMARY
+====================================================================================================
+In October 2026, 34-year-old municipal archivist Daniel Mercer discovered systematic anomalies inside
+the historical Case 17 records repository: historical documents were not being destroyed, but their
+content was being subtly altered. Hours after logging his findings into a restricted records bay,
+Mercer was found dead near the Presidio Heights district of San Francisco. Dropped near his body was
+a portable radio receiver mechanically locked to an off-band frequency, and an uncatalogued teletype
+message was intercepted: "You were looking at the wrong person."
+
+A digital investigation terminal is opened for school student investigators. Operating under the
+procedural oversight of The Director of Police, student operatives examine recovered crime scene
+negatives, historical correspondence, witness transcripts, dispatch audio cassettes, and newspaper
+clippings across seven 48-hour investigation waves.
+
+This master guide provides the exact answers, derivation steps, submission mechanisms, and narrative
+climax for all seven stages as implemented in the authoritative codebase and server-side validation.
+
+
+====================================================================================================
+2. STAGE-BY-STAGE INVESTIGATION WALKTHROUGH (STAGES 1 TO 7)
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+STAGE 1: THE ARCHIVE (The Archivist's Letter & Docket Registry)
+----------------------------------------------------------------------------------------------------
+* Title: The Archive
+* Subtitle: The archivist's letter & docket registry
+* Primary Objective: Examine the historical 1974 Exorcist letter and decipher the margin memorandum
+  to authenticate Port 17-B on the Archival Teletype Terminal.
+* Where to Begin:
+  - From the Dashboard (`/dashboard`), click "CONTINUE INVESTIGATION" or "INSPECT EVIDENCE FILES".
+  - Navigate to the Evidence Room (`/evidence`) and select Item EV-0103 ("The Exorcist's Letter &
+    Affixed Note").
+* Documents & Elements to Inspect:
+  - EV-0101: Scene Overview — Rear Alley (night establishing photo of wet cobblestones and barrier tape).
+  - EV-0102: Portable Radio Receiver (recovered battery-powered radio with fixed off-band channel dial).
+  - EV-0103: The Exorcist's Letter & Affixed Note (historical letter with affixed six-line cipher note).
+  - ARC-002: Partial Credential Worksheet (reference sheet with ink-masked passwords).
+* Exact Clues to Notice:
+  - Open EV-0103 to Sheet 2 (The Affixed Memorandum).
+  - Observe the six-line typed memorandum affixed to the lower boundary of the letter:
+      Line 1: "Zodiac correspondence retained in archival docket c"
+      Line 2: "Kept under strict chain-of-custody protocols a"
+      Line 3: "connecting historical cipher analysis with modern record s"
+      Line 4: "archive vault access keys remain restricted to official us e"
+      Line 5: "system verification confirms record modification sequence 1"
+      Line 6: "encrypted log transmission terminal port designation 7"
+  - The clue lies in the vertical alignment of the line boundaries:
+    - ACROSTIC (First character of each line read top-to-bottom): Z - K - c - a - s - e -> "zkcase"
+    - TELESTICH (Final character of each line read top-to-bottom): c - a - s - e - 1 - 7 -> "case17"
+* Clue Meaning:
+  - The left boundary reveals the designated archive directory/username ("zkcase").
+  - The right boundary reveals the clearance password ("case17").
+* Exact Submission Formats & Values:
+  - Terminal Directory / User: zkcase
+    (Accepted server variants: "zkcase", "zk", "zcase", "archivalb", "zkcase17")
+  - Clearance Passphrase / Key: case17
+    (Accepted server variants: "case17", "17", or "orion" if user is "zkcase17")
+* Where and How to Submit:
+  - Click "ACCESS TELETYPE TERMINAL (PORT 17-B) ->" inside EV-0103, or navigate to `/terminal` and select
+    "Stage 01: Teletype Port 17-B".
+  - Enter Directory: zkcase
+  - Enter Clearance Key: case17
+  - Click "TRANSMIT AUTHENTICATION SEQUENCE".
+* What Happens Upon Correct Submission:
+  - Mechanical relay chime plays (`tacticalAudio.playSuccess()`).
+  - Awards 100 base points (+ up to 24 hourly speed bonus points).
+  - Logs solve timestamp in Indian Standard Time (IST).
+  - Sets `stagesCompleted = 1`, advances `activeStage = 2`.
+  - Unlocks Evidence Items: EV-0201 (Photographic Negative Dossier), EV-0202, EV-0203, EV-0204.
+  - Triggers Intermission Modal `s1_to_s2` ("Archive Vault B Cleared // Lower Records Bay Unlocked").
+
+
+----------------------------------------------------------------------------------------------------
+STAGE 2: THE LOWER VAULT (County Records Bay & Negative Telemetry)
+----------------------------------------------------------------------------------------------------
+* Title: The Lower Vault
+* Subtitle: County records bay & negative telemetry
+* Primary Objective: Inspect the recovered forensic negative plates from county sheriff archives and
+  decode the stamped camera margin telemetry to locate the target residence.
+* Where to Begin:
+  - Navigate to Evidence Room (`/evidence`) and select newly declassified Item EV-0201 ("Photographic
+    Negative Dossier — Archival Evidence Plates 1–4").
+* Documents & Elements to Inspect:
+  - EV-0201 Sheet 1: Plate 1 (Lake Herman Road — Solano County turnout).
+  - EV-0201 Sheet 2: Plate 2 (Blue Rock Springs Park — Vallejo parking area).
+  - EV-0201 Sheet 3: Plate 3 (Lake Berryessa — Napa County shoreline).
+  - EV-0201 Sheet 4: Plate 4 (Presidio Heights — Washington & Cherry Streets incident scene).
+* Exact Clues to Notice:
+  - On Sheet 4 (Plate 4), examine the forensic camera metadata strip stamped on the negative border:
+      Stamped String: (CG.GHHGD, -LB.DEG I)
+  - Clue on the marginal worksheet: Letter-to-number 1:1 alphabetical position substitution cipher.
+    A=1, B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9, J=10, K=11, L=12.
+* Step-by-Step Decryption:
+  - Latitude component: "CG.GHHGD"
+    C = 3
+    G = 7
+    . = .
+    G = 7
+    H = 8
+    H = 8
+    G = 7
+    D = 4
+    Result: 37.78874 (Latitude: 37.78874° N)
+  - Longitude component: "-LB.DEG I"
+    - = -
+    L = 12
+    B = 2
+    . = .
+    D = 4
+    E = 5
+    G = 7
+    [space / marker] = 0
+    I = 9
+    Result: -122.45709 (Longitude: -122.45709° W)
+  - Full Coordinates: (37.78874, -122.45709)
+  - Geographic / Cadastral Deduction:
+    Plotting 37.78874° N, 122.45709° W in San Francisco resolves directly to Washington Street in the
+    Presidio Heights district, identifying municipal residential parcel House 3893 (directly across
+    from the corner of Washington and Cherry Streets).
+* Exact Submission Formats & Values:
+  - Cadastral House Number (Standard): 3893
+    (Accepted server variants: "3893", "house3893", "House 3893")
+  - Geographic Coordinates (Alternate): 37.78874, -122.45709
+    (Accepted server variants: "(37.78874, -122.45709)", "37.78874° N, 122.45709° W",
+    "37.78874 -122.45709", "37.78874, 122.45709")
+* Where and How to Submit:
+  - Click "OPEN COORDINATE TERMINAL" inside EV-0201 or navigate to `/terminal` -> "Stage 02: Coordinate
+    Deduction Terminal".
+  - Enter "3893" or "37.78874, -122.45709".
+  - Click "SUBMIT GEODETIC DEDUCTION".
+* What Happens Upon Correct Submission:
+  - Tactical confirmation tone plays.
+  - Awards 100 base points (+ hourly speed bonus).
+  - Sets `stage2DeductionSolved = true`, sets `stagesCompleted = 2`, advances `activeStage = 3`.
+  - Unlocks Evidence Items: CAS-017 (Witness Testimony — Case File 017) and EV-0301 (Coastal Transmission Mast).
+  - Enables Cartographic Map Security Gate on `/map`.
+  - Triggers Intermission Modal `s2_to_s3` ("Telemetry Resolved // Presidio Residence Identified").
+
+
+----------------------------------------------------------------------------------------------------
+STAGE 3: THE PRESIDIO WITNESS (Case Testimony & Cartographic Signal Map)
+----------------------------------------------------------------------------------------------------
+* Title: The Presidio Witness
+* Subtitle: Case testimony & regional survey
+* Primary Objective: Cross-reference witness interview CAS-017 with the Presidio address and authenticate
+  the Cartographic Signal Map security barrier.
+* Where to Begin:
+  - Inspect newly unlocked Item CAS-017 in Evidence Room (`/evidence/CAS-017`).
+  - Navigate to the Signal Map tab (`/map`).
+* Documents & Elements to Inspect:
+  - CAS-017: Witness Transcript (Subject interview from 21 Oct 2026. The witness describes sensory
+    recollections from late evening: an idling engine, an uncatalogued radio carrier pulse, and a
+    second-story window light going dark across the street).
+  - EV-0301: Coastal Transmission Mast (microwave relay station atop coastal ridge in Presidio).
+  - MapSecurityGate component on route `/map`.
+* Exact Clues to Notice:
+  - In CAS-017, the resident lives directly across from Washington & Cherry.
+  - On route `/map`, the Cartographic Regional Survey Map is locked behind a security gate:
+    "AUTHENTICATION REQUIRED: Enter the verified 4-digit house number deduced from the forensic camera
+    telemetry to release cartographic security seals."
+* Clue Meaning:
+  - The house number deduced in Stage 2 ("3893") serves as the master clearance key to unlock the
+    surveillance map.
+* Exact Submission Formats & Values:
+  - Security Key: 3893
+    (Accepted server variants: "3893", "house 3893")
+* Where and How to Submit:
+  - Open `/map`.
+  - Enter "3893" into the Map Security Gate input.
+  - Click "AUTHENTICATE REGIONAL SIGNAL MAP".
+* What Happens Upon Correct Submission:
+  - Audio relay switches to regional surveillance tone.
+  - Awards 100 base points (+ hourly speed bonus).
+  - Sets `mapGateUnlocked = true`, sets `stagesCompleted = 3`, advances `activeStage = 4`.
+  - Declassifies the interactive Northern California SVG map displaying four candidate telemetry sites.
+  - Unlocks Evidence Item: EV-0401 (Recovered Audio Cassette).
+  - Triggers Intermission Modal `s3_to_s4` ("Incoming Signal Intercept // The 24-Hour Challenge").
+
+
+----------------------------------------------------------------------------------------------------
+STAGE 4: THE 47-SECOND TAPE (Dispatch Recording & The 24-Hour Location Challenge)
+----------------------------------------------------------------------------------------------------
+* Title: The 47-Second Tape
+* Subtitle: Dispatch recording & signal candidate
+* Primary Objective: Analyze the recovered 47-second cassette EV-0401, reverse the final 17 seconds
+  of high-frequency pulse telemetry to recover spoken coordinates, and lock in the irreversible
+  target candidate on the Signal Map.
+* Where to Begin:
+  - Navigate to Evidence Room (`/evidence`) and select Item EV-0401 ("Recovered Audio Cassette").
+  - Open the dedicated audio playback deck.
+* Documents & Elements to Inspect:
+  - EV-0401: Audio Cassette (47-second audio waveform).
+  - Audio Timeline:
+    - 00:00 to 00:30 (First 30 seconds): Spoken monologue by the antagonist:
+      "Four locations. One has been chosen. Three are irrelevant. You have twenty-four hours to tell
+      me which one. Don't mistake this for a game, detectives... Choose carefully. I won't give you
+      a second chance. One wrong answer. One more name on your list. Tick-tock, detectives."
+    - 00:30 to 00:47 (Final 17 seconds): Spoken monologue ceases abruptly; high-frequency carrier
+      pulse anomaly and rhythmic pulse modulation.
+  - Signal Map (`/map`): Shows 4 candidate sites across Northern California:
+    - Site 01: Lake Herman Road (Solano County Turnout)
+    - Site 02: Blue Rock Springs (Vallejo Park)
+    - Site 03: Lake Berryessa (Napa County Shoreline)
+    - Site 04: Presidio Heights (Washington & Cherry Streets, San Francisco)
+* Exact Clues to Notice:
+  - Reversing the audio playback of the 17-second tail section (or analyzing its spectral envelope)
+    reveals a masked vocal track whispering geodetic coordinates:
+    "Three-Seven Point Seven-Eight-Eight-Five-Seven ... One-Two-Two Point Four-Five-Six-Zero-Five"
+    (37.78857° N, 122.45605° W).
+* Clue Meaning:
+  - Coordinates 37.78857° N, 122.45605° W align precisely with the street intersection of Washington &
+    Cherry in Presidio Heights, designating Site 04 as the authentic target.
+* Exact Submission Formats & Values:
+  - Target Selection: Site 04
+    (In-code value: `targetLocationChoice = 4`)
+* Where and How to Submit:
+  - Navigate to `/map`.
+  - Click on the marker for "Site 04 // Presidio Heights (Washington & Cherry)".
+  - Click "SUBMIT TARGET LOCATION CANDIDATE".
+  - Confirmation dialogue requires verification: exactly one correction is permitted prior to stage close.
+* What Happens Upon Correct Submission:
+  - Target selection is permanently recorded in operative profile.
+  - When stage window concludes: awards 100 base points + 20 target intercept bonus points (Total: 120 pts).
+  - Sets `stagesCompleted = 4`, advances `activeStage = 5`.
+  - Unlocks Evidence Item: EV-0501 (San Francisco Chronicle — Special Dispatch).
+  - Triggers Intermission Modal `s4_to_s5` ("Archival Alert // The Mercer Report").
+
+
+----------------------------------------------------------------------------------------------------
+STAGE 5: THE MERCER INQUEST (Chronicle Report & Restricted Suspect Database)
+----------------------------------------------------------------------------------------------------
+* Title: The Mercer Inquest
+* Subtitle: Chronicle report & confidential dossiers
+* Primary Objective: Inspect the front-page Chronicle special dispatch regarding the murder of
+  archivist Daniel Mercer, synthesize the reopened cipher formula, and unlock the Suspect Database.
+* Where to Begin:
+  - Navigate to Evidence Room (`/evidence`) and select Item EV-0501 ("San Francisco Chronicle — Special
+    Dispatch").
+  - Inspect the broadsheet headline and editorial callouts.
+* Documents & Elements to Inspect:
+  - EV-0501: San Francisco Chronicle Broadsheet (Headline: "ARCHIVIST DANIEL MERCER FOUND DEAD IN PRESIDIO
+    ANNEX / Historic Case 17 files altered before fatal attack / Anonymous message cites Z408 code").
+  - Article text mentions Mercer was analyzing the historic 408-symbol cipher from August 1969 when he
+    discovered that the cipher keys had been re-filed with a "REOPENED" classification docket.
+  - An affixed teletype slip carries a seven-mark cipher glyph and instructions:
+    "Combine the original cipher designation with the current administrative status."
+* Exact Clues to Notice:
+  - Cipher designation: "Z408"
+  - Administrative status: "REOPENED"
+  - Synthesis formula: Z408 + REOPENED -> "Z408_REOPENED"
+* Clue Meaning:
+  - The master passkey to decrypt the department's restricted suspect dossier archive is "Z408_REOPENED".
+* Exact Submission Formats & Values:
+  - Access Code: Z408_REOPENED
+    (Accepted server variants: "Z408_REOPENED", "z408reopened", "z408_reopened", "Z408-REOPENED", "z408")
+* Where and How to Submit:
+  - Navigate to `/suspects` (Suspect Files).
+  - The repository is gated by the Suspect Database Security Gate (`SuspectDatabaseView.tsx`).
+  - Enter "Z408_REOPENED" into the passkey prompt.
+  - Click "DECRYPT SUSPECT REPOSITORY".
+* What Happens Upon Correct Submission:
+  - Database access granted tone plays.
+  - Awards 100 base points (+ hourly speed bonus).
+  - Sets `suspectDbUnlocked = true`, sets `stagesCompleted = 5`, advances `activeStage = 6`.
+  - Declassifies restricted suspect dossiers:
+    - EV-0502: Suspect Dossier S-02 (Arthur Leigh Allen)
+    - EV-0503: Suspect Dossier S-03 (Richard Gaikowski)
+  - Unlocks Stage 6 Evidence Items: EV-0601 (Incident Report 06-B & The Torn Note) and EV-0602 (Archival
+    Revision Log & Unsent Message).
+  - Triggers Intermission Modal `s5_to_s6` ("Suspect Dossiers Declassified // Case Sector 06 Active").
+
+
+----------------------------------------------------------------------------------------------------
+STAGE 6: THE RECORD THAT REMEMBERED TOMORROW (Incident Report 06-B & Vale Notebook)
+----------------------------------------------------------------------------------------------------
+* Title: The Record That Remembered Tomorrow
+* Subtitle: Incident Report 06-B & Archival Revision Paradox
+* Primary Objective: Compare conflicting archival dockets, examine the revision timestamp paradox,
+  deduce the archive password from the torn note, and evaluate the 16mm archival reel.
+* Where to Begin:
+  - Navigate to Evidence Room (`/evidence`) and select Item EV-0601 ("Incident Report 06-B & The Torn Note").
+* Documents & Elements to Inspect:
+  - EV-0601: SFPD Incident Report 06-B (Reports an unidentified informant found dead in a locked room.
+    Recovered on the desk was a folder with duplicate files from Mercer's research and a torn paper
+    fragment initialed "E.V.").
+  - EV-0602: Archival Revision Log & Unsent Message (Exposes chronological contradiction: an internal
+    records alteration entry bears a modification timestamp that predates the incident it describes
+    by several hours).
+  - The Torn Note text on EV-0601 Sheet 2:
+    "The initials were left behind.
+     The year was never erased.
+     Put them together exactly as they appear in the record.
+     No spaces."
+* Step-by-Step Deduction:
+  - Clue 1 ("The initials were left behind"): The torn note bears the initials "E.V.", standing for
+    historical archival researcher Ellen Vale.
+  - Clue 2 ("The year was never erased"): The docket records her investigation log as "October 1971".
+    The year is "1971".
+  - Concatenation: "EV" + "1971" -> "EV1971".
+  - Alternate Script Clue: In the proposed 14-day dialogue script, tracing the contradictory edit trail
+    (Created 20:42, Archived 21:10, Edited 21:26) yields the keyword token "ECHO".
+  - Server validation accepts BOTH "EV1971" and "ECHO".
+* Exact Submission Formats & Values:
+  - Primary Archive Password: EV1971
+  - Script Variant / Token: ECHO
+* Where and How to Submit:
+  - Inside EV-0601, scroll to the "ARCHIVE FILE LOCKED" verification form.
+  - Enter "EV1971".
+  - Click "Verify Password".
+* What Happens Upon Correct Submission:
+  - Displays intercepted dispatch from Unknown Sender:
+    "You found the copy. Daniel found it too... You believed you were investigating the records.
+     You never asked who was keeping a record of you."
+  - Awards 100 base points.
+  - Unlocks Evidence Items: EV-0701 (Research Journal of Ellen Vale) and EV-0702 (Chronicle Final Edition).
+  - Unlocks action button: "OPEN ELLEN VALE'S JOURNAL (EV-0701) ->".
+  - Navigating to EV-0701 renders the research journal and the attached 16mm video player:
+    `FINAL_REVIEW.mp4` (or `WhatsApp_Video_2026-10-29_at_00.25.05_829df3d2.mp4`).
+  - Playing the reel reveals the antagonist anticipated every move of the investigation:
+    1. Exorcist margin telestich
+    2. Optical telemetry coordinate substitution
+    3. The 24-hour location choice
+  - Video concludes with canonical closing quote:
+    "You have tried very hard to find the killer... But did you ever think about what would happen if
+    he tried to find you?"
+  - Initiating the review sequence triggers the 6-step Controlled System Glitch (`ControlledSystemGlitch.tsx`),
+    phosphor collapse, and opens the Directorate Emergency Lockdown Modal displaying three sequenced
+    Director dispatches:
+      1. "The case is closed."
+      2. "You have done enough."
+      3. "Delete your local copies of the files and wait for further instructions."
+  - Clicking "Acknowledge Directive -> Proceed to Final Chronicle (Stage 07)" sets `stagesCompleted = 6`,
+    advances `activeStage = 7`, and navigates to `/debrief`.
+
+
+----------------------------------------------------------------------------------------------------
+STAGE 7: THE FINAL SIGNAL & CASE CLOSURE (Ending Video Reel, Glitch & Debrief Certificate)
+----------------------------------------------------------------------------------------------------
+* Title: Ellen Vale's Journal and the Final Review / The Final Signal & Closure
+* Subtitle: Research journal, 16mm reel & station incident
+* Primary Objective: Inspect the late Chronicle broadsheet, review the master ending reel, execute the
+  final system closure protocol, and claim the official Certificate of Case Closure.
+* Where to Begin:
+  - Route: `/debrief`.
+* Documents & Elements to Inspect:
+  - Tab 1: Chronicle Article (`EV-0702`) — San Francisco Chronicle Late City Edition:
+    - Giant Banner Headline: "POLICE RECRUIT FOUND DEAD INSIDE STATION"
+    - Subheading: "Internal investigation launched as questions emerge over altered Zodiac case files
+      and anomalous radio signals."
+    - Narrative: A 22-year-old police recruit assigned to Case 17 records duty was found dead inside
+      the station's lower archival vault. Recovered nearby was a portable radio receiver tuned to an
+      uncatalogued frequency, alongside historical correspondence from 1974. A teletype terminal in
+      an adjacent records room was left printing repetitive signals until power was severed.
+  - Tab 2: Ending Video Reel (`FINAL_REVIEW.mp4` / `WhatsApp_Video_2026-10-29_at_00.25.05_829df3d2.mp4`):
+    - Full 59.7-second master optical reel with synchronized stereo audio soundtrack.
+  - Tab 3: Certificate of Case Closure (Official performance standing, merit points tally, and seal).
+* Step-by-Step Climax Protocol:
+  1. On Tab 1 ("01. Chronicle Article"), read the report and click:
+     "Confirm Article Review & Proceed to Ending Reel ->".
+     (Sets `stage7Step = 'article_read'`).
+  2. On Tab 2 ("02. Ending Video Reel"), play the ending transmission reel in standard or Cinematic
+     Fullscreen mode.
+  3. When video ends (or upon clicking "Finalize Case & Generate Certificate ->"):
+     - Sets `stage7Step = 'ending_video_played'`.
+     - Executes the 6-step Controlled System Glitch sequence (`ControlledSystemGlitch.tsx`).
+     - Screen flickers, displays red tactical malfunction alerts, simulates phosphor CRT collapse,
+       and resolves into the post-ending aftermath.
+  4. Script Synthesis Sentence (Proposed 14-Day Dialogue Model):
+     - In the dialogue script, operatives synthesize the six collected tokens:
+       Token 1: ZK (Stage 1 margin)
+       Token 2: 3893 (Stage 2/3 house address)
+       Token 3: MAP (Stage 3 survey)
+       Token 4: REVERSE (Stage 4 cassette)
+       Token 5: 17 (Stage 1/4 duration)
+       Token 6: ECHO (Stage 6 revision token)
+     - Synthesis Sentence: "THE LAST SIGNAL CAME FROM INSIDE THE ARCHIVE"
+     - Both the interactive tab completion and server challenge key `stage7_debrief` validate this closure.
+* Exact Submission Formats & Values:
+  - Interface Action: Click "Confirm Article Review" followed by "Finalize Case & Generate Certificate ->".
+  - Script Synthesis Sentence: THE LAST SIGNAL CAME FROM INSIDE THE ARCHIVE
+* What Happens Upon Final Case Closure:
+  - Awards final stage score (100 base points + hourly speed bonus; max 124 points).
+  - Sets `stagesCompleted = 7`, `stage7Step = 'completed'`, `status = 'COMPLETED'`.
+  - Total cumulative case score calculated (up to 868 merit points across all 7 stages).
+  - Automatically posts verified 7/7 standing to `/api/leaderboard/sync`.
+  - Declassifies Tab 3 ("03. Debrief Certificate"):
+    - Official Certificate of Case Closure with seal `TLS-0017-FINAL`.
+    - Itemized stage audit docket with exact solve timestamps in Indian Standard Time (IST).
+    - Operative call-sign, assigned class, and masked admission number.
+    - Activates persistent cracked-screen aftermath diagnostic toggle.
+
+
+====================================================================================================
+3. IN-DEPTH PUZZLE SOLUTIONS & CRYPTOGRAPHIC DERIVATIONS
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+PUZZLE 1: THE AFFIXED EXORCIST MEMORANDUM (STAGE 1)
+----------------------------------------------------------------------------------------------------
+* Evidence Item: EV-0103, Sheet 2.
+* Raw Text:
+    [Z]odiac correspondence retained in archival docket [c]
+    [K]ept under strict chain-of-custody protocols [a]
+    [c]onnecting historical cipher analysis with modern record [s]
+    [a]rchive vault access keys remain restricted to official us [e]
+    [s]ystem verification confirms record modification sequence [1]
+    [e]ncrypted log transmission terminal port designation [7]
+* Cryptographic Mechanism: Dual Boundary Steganography (Acrostic + Telestich).
+  - Acrostic (Left Margin, indices 0 of lines 1–6):
+    Line 1: Z
+    Line 2: K
+    Line 3: c
+    Line 4: a
+    Line 5: s
+    Line 6: e
+    Result: "zkcase" (Directory)
+  - Telestich (Right Margin, last non-whitespace character of lines 1–6):
+    Line 1: c
+    Line 2: a
+    Line 3: s
+    Line 4: e
+    Line 5: 1
+    Line 6: 7
+    Result: "case17" (Passphrase)
+* Server Validation (`server.ts`):
+  Evaluates `cleanUser` and `cleanAns` independently. `validUsers = ['zkcase', 'zkcase17', 'zk', 'zcase', 'archivalb']`
+  and `validAnswers = ['case17', '17']`. Neither field can be empty or substitute for the other.
+
+----------------------------------------------------------------------------------------------------
+PUZZLE 2: CAMERA TELEMETRY COORDINATE SUBSTITUTION (STAGE 2)
+----------------------------------------------------------------------------------------------------
+* Evidence Item: EV-0201, Sheet 4 (Plate 4 margin).
+* Raw Stamped String: (CG.GHHGD, -LB.DEG I)
+* Cipher Table:
+    A=1, B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9, J=10, K=11, L=12
+* Substitution Mapping:
+    Latitude:
+      C -> 3
+      G -> 7
+      . -> .
+      G -> 7
+      H -> 8
+      H -> 8
+      G -> 7
+      D -> 4
+      => 37.78874
+    Longitude:
+      - -> -
+      L -> 12
+      B -> 2
+      . -> .
+      D -> 4
+      E -> 5
+      G -> 7
+      [Space] -> 0
+      I -> 9
+      => -122.45709
+* Geodetic Alignment:
+  Coordinates (37.78874° N, -122.45709° W) pinpoint municipal residential building House 3893 on
+  Washington Street in Presidio Heights, San Francisco.
+* Server Validation:
+  Matches house number "3893" or coordinate float values containing "37.78874" and "122.45709".
+
+----------------------------------------------------------------------------------------------------
+PUZZLE 3: CARTOGRAPHIC MAP SECURITY GATE (STAGE 3)
+----------------------------------------------------------------------------------------------------
+* Component: `MapSecurityGate.tsx` on route `/map`.
+* Deduction:
+  The prompt demands the 4-digit house number deduced from the forensic camera telemetry in Stage 2.
+* Answer: 3893.
+* Server Validation: `gate_map` checks `cleanAnswer === '3893'`.
+
+----------------------------------------------------------------------------------------------------
+PUZZLE 4: THE 47-SECOND TAPE & REVERSED AUDIO PULSE (STAGE 4)
+----------------------------------------------------------------------------------------------------
+* Evidence Item: EV-0401.
+* Technical Structure:
+  Total file duration: 47.0 seconds.
+  Spoken audio duration: 30.0 seconds (killer monologue).
+  Carrier pulse anomaly duration: 17.0 seconds (00:30.000 to 00:47.000).
+* Reverse Spectrogram / Audio Demodulation:
+  Playing the 17-second tail in reverse reveals the spoken coordinate digits:
+  37.78857, -122.45605.
+* Map Cross-Reference:
+  - Site 01 (Lake Herman): 38.0934, -122.1485
+  - Site 02 (Blue Rock Springs): 38.1292, -122.1931
+  - Site 03 (Lake Berryessa): 38.5623, -122.2341
+  - Site 04 (Presidio Heights / Washington & Cherry): 37.78857, -122.45605
+* Correct Candidate: Site 04.
+
+----------------------------------------------------------------------------------------------------
+PUZZLE 5: SUSPECT DATABASE MASTER ACCESS (STAGE 5)
+----------------------------------------------------------------------------------------------------
+* Evidence Item: EV-0501.
+* Synthesis:
+  Chronicle special dispatch states Daniel Mercer found records indicating the historic 408-symbol
+  cipher was reopened. The confidential file docket classification is stamped "REOPENED".
+  Cipher Token: "Z408"
+  Status Token: "REOPENED"
+  Combined Passkey: "Z408_REOPENED"
+* Server Validation:
+  `gate_suspect_db` checks `norm(answer).includes('z408reopened')` or `c === 'z408'`.
+
+----------------------------------------------------------------------------------------------------
+PUZZLE 6: THE VALE NOTEBOOK & ARCHIVAL CONTRADICTION (STAGE 6)
+----------------------------------------------------------------------------------------------------
+* Evidence Items: EV-0601, EV-0602.
+* Primary Implementation (PDF / Current Codebase):
+  Torn note on EV-0601: "The initials were left behind. The year was never erased. Put them together
+  exactly as they appear in the record. No spaces."
+  - Initials: "EV" (Ellen Vale)
+  - Year: "1971" (October 1971 journal)
+  - Password: EV1971
+* Proposed Dialogue Script Model (Token ECHO):
+  Archival Revision Log EV-0602 reveals three contradictory timestamps:
+  1. Metadata created: 20:42
+  2. Dispatch log archived: 21:10
+  3. Access record edited: 21:26
+  Tracing the edit trail reveals the internal keyword token "ECHO".
+* Server Validation:
+  `stage6_record_tomorrow` and `gate_audio` validate:
+  `if (c.includes('ev1971') || c.includes('echo')) isCorrect = true;`
+
+----------------------------------------------------------------------------------------------------
+PUZZLE 7: FINAL TOKEN SYNTHESIS & EPILOGUE (STAGE 7)
+----------------------------------------------------------------------------------------------------
+* Climax Synthesis:
+  Operatives assemble the six tokens gathered across the 14 days:
+  Token 1 (Stage 1): ZK
+  Token 2 (Stage 2/3): 3893
+  Token 3 (Stage 3): MAP
+  Token 4 (Stage 4): REVERSE
+  Token 5 (Stage 4/5): 17
+  Token 6 (Stage 6): ECHO
+  Final Deductive Sentence: "THE LAST SIGNAL CAME FROM INSIDE THE ARCHIVE"
+* Meaning:
+  The signals were never broadcast from an external fugitive; they originated from a terminal inside
+  the records vault itself.
+
+
+====================================================================================================
+4. COMPLETE EVIDENCE & FORENSIC CLUE INDEX
+====================================================================================================
+
+| Evidence ID | Official Title | Category | Kind | Stage | Game Location | Information Revealed | Required? | Associated Puzzle |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **EV-0101** | Scene Overview — Rear Alley | Photograph | Scene photo | Stage 1 | `/evidence/EV-0101` | Establishes night scene, wet cobblestones, barrier tape, dropped radio | Optional | Atmospheric Context |
+| **EV-0102** | Portable Radio Receiver | Physical | Physical evidence | Stage 1 | `/evidence/EV-0102` | Radio model, mechanical impact, fixed off-band frequency dial | Optional | Atmospheric Context |
+| **EV-0103** | The Exorcist's Letter & Affixed Note | Document | Document | Stage 1 | `/evidence/EV-0103` | Affixed 6-line memo with acrostic "zkcase" and telestich "case17" | **REQUIRED** | Puzzle 1 (Stage 1 Gate) |
+| **ARC-002** | Partial Credential Worksheet | Document | Document | Stage 1 | `/evidence/ARC-002` | Reference sheet of system credentials with dark ink redactions | Optional | Puzzle 1 Secondary Hint |
+| **EV-0201** | Photographic Negative Dossier (Plates 1–4) | Photograph | Forensic negative | Stage 2 | `/evidence/EV-0201` | Plate 4 negative margin stamps coordinates `(CG.GHHGD, -LB.DEG I)` | **REQUIRED** | Puzzle 2 (Stage 2 Gate) |
+| **CAS-017** | Witness Testimony — Case File 017 | Interview | Interview | Stage 3 | `/evidence/CAS-017` | Resident interview across from Washington & Cherry (House 3893) | **REQUIRED** | Puzzle 3 (Map Gate) |
+| **EV-0301** | Coastal Transmission Mast | Photograph | Location | Stage 3 | `/evidence/EV-0301` | Triangulation microwave tower atop coastal ridgeline in Presidio | Optional | Regional Survey Context |
+| **EV-0401** | Recovered Audio Cassette | Audio | Audio | Stage 4 | `/evidence/EV-0401` | 47s tape; 30s speech + 17s reversed vocal pulse (37.78857, -122.45605) | **REQUIRED** | Puzzle 4 (Site 04 Selection) |
+| **EV-0501** | SF Chronicle — Special Dispatch | Newspaper | Newspaper | Stage 5 | `/evidence/EV-0501` | Front page on Mercer's death; Z408 cipher note with "REOPENED" status | **REQUIRED** | Puzzle 5 (Suspect DB Gate) |
+| **EV-0502** | Suspect Dossier S-02: Arthur Leigh Allen | Document | Interview | Stage 5 | `/evidence/EV-0502` | Department file on Person of Interest S-02 (Vallejo custodian) | Optional | Suspect Inquest Context |
+| **EV-0503** | Suspect Dossier S-03: Richard Gaikowski | Document | Interview | Stage 5 | `/evidence/EV-0503` | Department file on Person of Interest S-03 (Underground press writer)| Optional | Suspect Inquest Context |
+| **EV-0601** | Incident Report 06-B & The Torn Note | Document | Document | Stage 6 | `/evidence/EV-0601` | Report on deceased source; torn note with initials E.V. and year 1971 | **REQUIRED** | Puzzle 6 (Vale Password) |
+| **EV-0602** | Archival Revision Log & Unsent Message | Document | Document | Stage 6 | `/evidence/EV-0602` | Chronological paradox: edit timestamp predates event (Token: ECHO) | Optional | Puzzle 6 Token Deduction |
+| **EV-0701** | Research Journal of Ellen Vale | Document | Document | Stage 7 | `/evidence/EV-0701` | October 1971 journal anticipating investigator moves + `FINAL_REVIEW.mp4`| **REQUIRED** | Stage 6 Review & Glitch |
+| **EV-0702** | Chronicle Final Edition — Station Incident | Newspaper | Newspaper | Stage 7 | `/evidence/EV-0702` | Headline: Police recruit found dead inside station; internal investigation| **REQUIRED** | Stage 7 Climax & Closure |
+
+
+====================================================================================================
+5. FINAL INVESTIGATION SOLUTION & COMPLETE NARRATIVE LORE
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+THE UNDERLYING MYSTERY: WHAT ACTUALLY HAPPENED
+----------------------------------------------------------------------------------------------------
+The core narrative revelation of Case TLS-0017 is that the modern "Zodiac signals" were never
+transmitted by an immortal historical killer or a distant fugitive. Instead, the entire phenomenon
+is an INTERNAL CRIMINOLOGICAL CONSPIRACY operated from inside the Department of Archival
+Investigation itself.
+
+Beginning in October 1971, historical researcher Ellen Vale noticed that original Case 17 records
+were subject to unauthorized chronological revisions: memos had margins aligned with secret keys,
+and teletype lines had been tampered with. She documented her findings in a private journal (EV-0701)
+and compiled an optical reel predicting that future investigators would follow the planted breadcrumb
+trail rather than questioning the authority of the archives.
+
+In October 2026, 34-year-old municipal archivist Daniel Mercer noticed that document entries
+in the digital repository were being altered in real time: timestamps were being adjusted to predate
+real-world police dispatches. Before Mercer could bring his findings to external authorities, he was
+lured to an annex near Presidio Heights and killed.
+
+The antagonist—an internal operative within the records department—planted the dropped radio, the
+altered Exorcist memorandum, the negative telemetry coordinates, and the reversed cassette tape to
+conduct a structured psychological test on incoming student investigators. The antagonist wanted to
+prove that people would blindly chase historical ghosts rather than noticing that the evidence was
+being fabricated by the very institution hosting the investigation.
+
+When the student investigator solves Stage 6 and penetrates Ellen Vale's locked files, the antagonist
+realizes the operative has reached the core secret. The Directorate Emergency Lockdown protocol is
+abruptly initiated, ordering the investigator to cease inquiries and delete local files. Simultaneously,
+a 22-year-old police recruit assigned to records duty—who assisted in transferring the files—is found
+dead inside the lower archival vault, with an operating teletype receiver repeating the final carrier
+signal.
+
+The final conclusion players reach is embodied in the synthesis sentence:
+"THE LAST SIGNAL CAME FROM INSIDE THE ARCHIVE."
+
+----------------------------------------------------------------------------------------------------
+CHARACTER DOSSIERS & MOTIVES
+----------------------------------------------------------------------------------------------------
+1. Daniel Mercer (1992–2026):
+   - Role: Municipal records archivist.
+   - Fate: First modern victim; murdered in October 2026 after discovering chronological anomalies.
+   - Legacy: Left the Z408_REOPENED docket notes and initiated the student inquiry portal.
+
+2. Ellen Vale (fl. 1971):
+   - Role: Archival researcher in the SFPD Special Inquiries division.
+   - Contribution: Author of research journal EV-0701 and the 16mm archival reel FINAL_REVIEW.mp4.
+   - Significance: Recognized over 50 years earlier that someone within the department was manipulating
+     historical records, and correctly predicted the exact deductive steps modern investigators would take.
+
+3. The Director of Police:
+   - Role: Institutional authority and narrator of official dispatches.
+   - Persona: Demands order, rigid note-taking, and procedural compliance.
+   - Narrative Function: Represents institutional denial. In Stage 6, when the investigation gets too
+     close to internal tampering, the Director issues the emergency blackout: "The case is closed. You
+     have done enough. Delete your local copies of the files and wait for further instructions."
+
+4. The Antagonist / "The Last Signal":
+   - Identity: An internal department operative using the persona of the historic killer.
+   - Motive: To manipulate historical memory, test investigator psychology, and eliminate anyone who
+     uncovers the falsification of the records room archives.
+
+5. The 22-Year-Old Police Recruit:
+   - Role: The player's immediate predecessor inside the station records annex.
+   - Fate: Discovered dead inside the station archival vault in the Stage 7 Chronicle Final Edition
+     (EV-0702), proving that the danger is immediate, physical, and inside the building.
+
+----------------------------------------------------------------------------------------------------
+COMPREHENSIVE CHRONOLOGY (1968–2026)
+----------------------------------------------------------------------------------------------------
+* December 20, 1968: Historical Lake Herman Road incident (Plate 1 / Site 01).
+* July 4, 1969: Historical Blue Rock Springs incident (Plate 2 / Site 02).
+* September 27, 1969: Historical Lake Berryessa incident (Plate 3 / Site 03).
+* October 11, 1969: Historical Presidio Heights incident at Washington & Cherry (Plate 4 / Site 04).
+* October 1971: Ellen Vale compiles research journal EV-0701, identifying archival tampering and
+  recording the 16mm prediction reel.
+* January 1974: The Exorcist letter is archived; margin memorandum affixed with acrostic "zkcase" and
+  telestich "case17".
+* October 19, 2026: Daniel Mercer flags anomalous document modifications; handheld radio EV-0102 is
+  recovered on wet cobblestones behind barrier tape.
+* October 21, 2026: Daniel Mercer is killed; Case TLS-0017 investigation portal opened to student teams.
+* October 25, 2026: 47-second audio cassette EV-0401 intercepted with reversed coordinate pulse.
+* October 27, 2026: SF Chronicle publishes Mercer inquest report (Z408_REOPENED).
+* October 29, 2026: Informant found dead with torn note EV1971; Ellen Vale notebook evaluated; Director
+  orders transmission blackout.
+* October 30, 2026: 22-year-old recruit found dead inside station records room; case concluded and
+  sealed with certificate TLS-0017-FINAL.
+
+
+====================================================================================================
+6. ADMINISTRATOR QUICK-REFERENCE ANSWER TABLE
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+MASTER ANSWER MATRIX
+----------------------------------------------------------------------------------------------------
+
+| Stage | Challenge Key | Canonical Answer | Accepted Variants | Required Evidence | Unlock / Reward | Base Pts | Max Pts |
+| :---: | :--- | :--- | :--- | :--- | :--- | :---: | :---: |
+| **01** | `gate_zk_login` | User: `zkcase`<br>Pass: `case17` | User: `zk`, `zcase`, `archivalb`<br>Pass: `17`, or `orion` | EV-0103 | EV-0201 (Plates 1–4), Stage 2 | 100 | 124 |
+| **02** | `stage2_coords` | `3893` | `House 3893`<br>`37.78874, -122.45709`<br>`(37.78874, -122.45709)` | EV-0201 | CAS-017, EV-0301, Stage 3 | 100 | 124 |
+| **03** | `gate_map` | `3893` | `3893`, `house 3893` | CAS-017 | Interactive Signal Map, EV-0401, Stage 4 | 100 | 124 |
+| **04** | Target Selection | `Site 04` | Site 04 (Presidio Heights / Washington & Cherry) | EV-0401, `/map` | EV-0501, Stage 5 (+20 Target Bonus) | 100 | 144 |
+| **05** | `gate_suspect_db` | `Z408_REOPENED` | `z408reopened`, `z408_reopened`, `Z408-REOPENED`, `z408` | EV-0501 | EV-0502, EV-0503, EV-0601, EV-0602, Stage 6 | 100 | 124 |
+| **06** | `stage6_record_tomorrow` | `EV1971` | `ev1971`, `ECHO`, `echo` | EV-0601, EV-0602 | EV-0701 (Journal & Reel), EV-0702, Stage 7 | 100 | 124 |
+| **07** | `stage7_debrief` | Case Finalization Click /<br>`THE LAST SIGNAL CAME FROM INSIDE THE ARCHIVE` | Article read confirm + Ending reel finalize | EV-0701, EV-0702 | Debrief Certificate (`TLS-0017-FINAL`), Case Solved | 100 | 124 |
+
+* Maximum Cumulative Score: 868 Merit Points (700 Base Points + 148 Max Speed Bonus + 20 Site 04 Target Bonus).
+
+----------------------------------------------------------------------------------------------------
+SCORING ENGINE RULES (Asia/Kolkata / IST / UTC+05:30)
+----------------------------------------------------------------------------------------------------
+1. Base Points: Exactly 100 points awarded per cleared stage.
+2. Hourly Speed Bonus: +1 point per elapsed hour between stage opening and solve timestamp, capped
+   at 24 points max per stage.
+   Formula: `hourlyBonus = min(24, max(0, floor((solveTime - openTime) / 3600000)))`
+3. Target Intercept Bonus (Stage 4 only): +20 points awarded for correctly locking in Site 04.
+4. Late Submissions: Submissions made after the stage deadline award 0 competitive points (story
+   progression continues, but `scoringEligible = false`).
+5. Dual Release Enforcement (`isStageAccessible`):
+   A stage unlocks ONLY when:
+   `PREVIOUS_STAGE_COMPLETED == TRUE` AND `CURRENT_TIME >= RELEASE_TIMESTAMP`
+   (Verified staff testing accounts with `hasStageOverride = true` bypass timetable gates).
+
+
+====================================================================================================
+7. SCRIPT RECONCILIATION & DISCREPANCY AUDIT NOTES
+====================================================================================================
+
+During the comprehensive audit of the project documentation and source code, two distinct design
+frameworks were analyzed:
+1. Framework A: Original Game Design Document (`The_Last_Signal_Organized.pdf` / Production Codebase).
+2. Framework B: Proposed 14-Day Dialogue Script (`The_Last_Signal_14_Day_Dialogues.docx` / `DIALOGUE_SCRIPT.md`).
+
+The following technical differences were identified and resolved in the codebase:
+
+1. Stage 6 Answer:
+   - Framework A specifies the archive password "EV1971" derived from Ellen Vale's initials and the
+     October 1971 journal year.
+   - Framework B proposes the keyword token "ECHO" derived from contradictory file timestamps.
+   - RECONCILIATION: The backend verification route in `server.ts` accepts BOTH `ev1971` and `echo`.
+     Both inputs successfully clear Stage 6 and unlock the final stage.
+
+2. Stage 7 Conclusion:
+   - Framework A implements the interactive broadsheet review (`POLICE RECRUIT FOUND DEAD INSIDE STATION`),
+     the unadulterated `FINAL_REVIEW.mp4` ending reel, and the Controlled System Glitch phosphor collapse.
+   - Framework B proposes typing the full token synthesis sentence:
+     "THE LAST SIGNAL CAME FROM INSIDE THE ARCHIVE".
+   - RECONCILIATION: The frontend provides the full cinematic interactive experience, while the
+     backend endpoint `/api/challenges/submit` accepts `stage7_debrief` to ensure compatibility
+     with automated assessment.
+
+3. Content Safety Mandates (Strictly Enforced for School Audience):
+   - Fictional Simulation Guarantee: All GPS coordinates and locations are explicitly marked as
+     fictional simulation data. Physical visits to real-world locations are strictly prohibited.
+   - Non-Destructive System Freeze: The Stage 6 and Stage 7 system glitch sequences are purely theatrical
+     CSS/SVG visual effects. No local files are modified, no browser storage is cleared, and an
+     emergency bypass button (`[ESC] Bypass Malfunction`) is continuously accessible to ensure young
+     students never feel distressed or locked out of their devices.
+
+====================================================================================================
+END OF CASE TLS-0017 MASTER PUZZLE GUIDE & ANSWER KEY
+====================================================================================================

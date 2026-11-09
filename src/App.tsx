@@ -336,6 +336,9 @@ export default function App() {
   useEffect(() => {
     const profile = computeLocationProfile(route);
     tacticalAudio.setLocationProfile(profile);
+    if (route.view === 'debrief' || (route.view === 'viewer' && (route.id === 'EV-0701' || route.id === 'EV-0702'))) {
+      signalAudio.cleanup();
+    }
   }, [route]);
 
   // Asynchronous session restoration (Supabase Auth / Local cache)
@@ -2134,8 +2137,9 @@ function EvidenceRoomView({ progress }: { progress: UserProgress }) {
           const itemStage = item.stage ?? 1;
           const isItemUnlocked =
             Boolean(progress.hasStageOverride) ||
+            progress.unlockedEvidenceIds.includes(item.id) ||
             (isStageAccessible(itemStage, progress.stagesCompleted, new Date(), false) &&
-              (progress.unlockedEvidenceIds.includes(item.id) || itemStage <= progress.stagesCompleted + 1));
+              itemStage <= progress.stagesCompleted + 1);
 
           return (
             <div
@@ -2319,8 +2323,9 @@ function EvidenceViewerView({
   const itemStage = item.stage ?? 1;
   const isItemUnlocked =
     Boolean(progress.hasStageOverride) ||
+    progress.unlockedEvidenceIds.includes(item.id) ||
     (isStageAccessible(itemStage, progress.stagesCompleted, new Date(), false) &&
-      (progress.unlockedEvidenceIds.includes(item.id) || itemStage <= progress.stagesCompleted + 1));
+      itemStage <= progress.stagesCompleted + 1);
 
   if (!isItemUnlocked) {
     const directive = getInvestigatorDirective(progress);

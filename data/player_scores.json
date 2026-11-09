@@ -1,1 +1,15 @@
-{}
+{
+  "test_op_1794045246393": {
+    "callSign": "test_op_1794045246393",
+    "fullName": "test_op_1794045246393",
+    "studentClass": "Class 9",
+    "score": 220,
+    "stagesCompleted": 2,
+    "lastProgress": "2026-11-07T09:54:06.420Z",
+    "excludeFromLeaderboard": false,
+    "hasStageOverride": false,
+    "teamName": null,
+    "isStaff": false,
+    "updatedAt": "2026-11-07T09:54:06.428Z"
+  }
+}

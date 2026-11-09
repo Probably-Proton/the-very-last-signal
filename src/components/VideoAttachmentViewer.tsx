@@ -43,6 +43,7 @@ import {
   X,
 } from 'lucide-react';
 import { tacticalAudio } from '@/src/lib/tacticalAudio';
+import { signalAudio } from '@/src/lib/signalAudio';
 import { calculateStageScore } from '@/src/lib/stageConfig';
 import type { UserProgress } from '@/src/lib/prototypeAuth';
 import { ControlledSystemGlitch } from './ControlledSystemGlitch';
@@ -97,10 +98,12 @@ export function VideoAttachmentViewer({
     };
   }, [isNearFullscreen]);
 
-  // Clean up location audio upon component unmount
+  // Clean up location audio upon component mount & unmount
   useEffect(() => {
+    signalAudio.cleanup();
+    tacticalAudio.setLocationProfile('ending');
     return () => {
-      // Restore final investigation profile when unmounting
+      signalAudio.cleanup();
       tacticalAudio.setLocationProfile('final_investigation');
     };
   }, []);
@@ -218,7 +221,7 @@ export function VideoAttachmentViewer({
   };
 
   // Triggered when glitch sequence completes
-  const handleGlitchComplete = () => {
+  const handleGlitchComplete = useCallback(() => {
     setIsGlitching(false);
     setShowFreezeModal(true);
     setDirectorStep(1);
@@ -233,7 +236,7 @@ export function VideoAttachmentViewer({
       const nextCompleted = Math.max(prev.stagesCompleted, 6);
       const nextActive = Math.max(prev.activeStage, 7);
       const nextUnlocked = Array.from(
-        new Set([...prev.unlockedEvidenceIds, 'EV-0701'])
+        new Set([...prev.unlockedEvidenceIds, 'EV-0701', 'EV-0702'])
       );
       const nextScores = {
         ...prev.stageScores,
@@ -262,7 +265,7 @@ export function VideoAttachmentViewer({
         status: 'IN PROGRESS',
       };
     });
-  };
+  }, [onUpdateProgress]);
 
   // When video naturally ends
   const handleVideoEnded = () => {
@@ -291,10 +294,10 @@ export function VideoAttachmentViewer({
             playsInline
             controls
             onEnded={handleVideoEnded}
-            className="w-full h-full object-contain bg-black"
+            className="w-full h-full object-contain bg-black block"
           >
-            <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
             <source src="/assets/aistudio/WhatsApp_Video_2026-10-29_at_00.25.05_829df3d2.mp4" type="video/mp4" />
+            <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
           </video>
           <button
             type="button"
@@ -369,10 +372,10 @@ export function VideoAttachmentViewer({
             onError={() => {
               setVideoLoadError(true);
             }}
-            className="w-full h-full object-contain bg-black"
+            className="w-full h-full object-contain bg-black block"
           >
-            <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
             <source src="/assets/aistudio/WhatsApp_Video_2026-10-29_at_00.25.05_829df3d2.mp4" type="video/mp4" />
+            <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
             Your browser does not support HTML5 video playback.
           </video>
 

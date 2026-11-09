@@ -264,11 +264,14 @@ export function createInitialProgress(callSign: string): UserProgress {
 }
 
 /**
- * Get progress for a specific user, safely backfilling any newly introduced fields
+ * Get progress for a specific user, safely backfilling any newly introduced fields.
+ * Does NOT immediately persist createInitialProgress() to localStorage, ensuring that
+ * unhydrated reads never overwrite pending remote database sync or valid historical states.
  */
 export function getUserProgress(callSign: string): UserProgress {
   try {
-    const raw = localStorage.getItem(PROGRESS_PREFIX + callSign.toLowerCase());
+    const cleanKey = PROGRESS_PREFIX + callSign.trim().toLowerCase();
+    const raw = localStorage.getItem(cleanKey);
     if (raw) {
       const parsed = JSON.parse(raw);
       const defaults = createInitialProgress(callSign);
@@ -295,20 +298,86 @@ export function getUserProgress(callSign: string): UserProgress {
   } catch (err) {
     console.error('Failed to read progress', err);
   }
-  const fresh = createInitialProgress(callSign);
-  saveUserProgress(fresh);
-  return fresh;
+  // Return fresh defaults in-memory only — DO NOT call saveUserProgress() here!
+  // This prevents un-hydrated initial states from wiping existing progress before remote sync completes.
+  return createInitialProgress(callSign);
 }
 
 /**
- * Save progress for a specific user
+ * Save progress for a specific user with non-destructive preservation guards.
+ * Guarantees that empty, unhydrated, or failed remote sync payloads cannot overwrite
+ * valid existing completions, scores, or unlocked stages.
  */
-export function saveUserProgress(progress: UserProgress): void {
+export function saveUserProgress(progress: UserProgress, allowDowngrade = false): void {
+  if (!progress || !progress.callSign) return;
   try {
-    localStorage.setItem(
-      PROGRESS_PREFIX + progress.callSign.toLowerCase(),
-      JSON.stringify(progress)
-    );
+    const cleanKey = PROGRESS_PREFIX + progress.callSign.trim().toLowerCase();
+    const existingRaw = localStorage.getItem(cleanKey);
+    let toSave: UserProgress = progress;
+
+    if (existingRaw && !allowDowngrade) {
+      try {
+        const existing = JSON.parse(existingRaw);
+        const existingCompleted = Number(existing.stagesCompleted) || 0;
+        const incomingCompleted = Number(progress.stagesCompleted) || 0;
+        const existingScore = Number(existing.score) || 0;
+        const incomingScore = Number(progress.score) || 0;
+
+        // Detect attempt to overwrite existing progress with lower stages or a zero-state
+        const isDowngrade =
+          (existingCompleted > incomingCompleted) ||
+          (existingScore > incomingScore && incomingCompleted === 0);
+
+        if (isDowngrade) {
+          console.warn(
+            `[saveUserProgress] Guard triggered for @${progress.callSign}: preserving existing Stage ${existingCompleted} (${existingScore} pts) over incoming Stage ${incomingCompleted} (${incomingScore} pts). Reconciling safely.`
+          );
+
+          // Reconcile stage scores per stage without duplicate awards
+          const mergedStageScores: Record<number, number> = {
+            ...(existing.stageScores || {}),
+            ...(progress.stageScores || {}),
+          };
+          const mergedCompleted = Math.max(existingCompleted, incomingCompleted);
+          const reconciledScore = Object.values(mergedStageScores).reduce((sum, pts) => sum + (Number(pts) || 0), 0);
+
+          toSave = {
+            ...existing,
+            ...progress,
+            stagesCompleted: mergedCompleted,
+            activeStage: Math.max(existing.activeStage || 1, progress.activeStage || 1, Math.min(7, mergedCompleted + 1)),
+            score: Math.max(existingScore, reconciledScore),
+            stageScores: mergedStageScores,
+            stageSolveTimestamps: {
+              ...(existing.stageSolveTimestamps || {}),
+              ...(progress.stageSolveTimestamps || {}),
+            },
+            stageScoringEligible: {
+              ...(existing.stageScoringEligible || {}),
+              ...(progress.stageScoringEligible || {}),
+            },
+            unlockedEvidenceIds: Array.from(new Set([
+              ...(existing.unlockedEvidenceIds || []),
+              ...(progress.unlockedEvidenceIds || []),
+            ])),
+            solvedChallengeKeys: Array.from(new Set([
+              ...(existing.solvedChallengeKeys || []),
+              ...(progress.solvedChallengeKeys || []),
+            ])),
+            stage2DeductionSolved: Boolean(existing.stage2DeductionSolved || progress.stage2DeductionSolved),
+            mapGateUnlocked: Boolean(existing.mapGateUnlocked || progress.mapGateUnlocked),
+            suspectDbUnlocked: Boolean(existing.suspectDbUnlocked || progress.suspectDbUnlocked),
+            systemFreezeTriggered: Boolean(existing.systemFreezeTriggered || progress.systemFreezeTriggered),
+            teamName: progress.teamName || existing.teamName || null,
+            teamCode: progress.teamCode || existing.teamCode || null,
+          };
+        }
+      } catch (parseErr) {
+        console.warn('[saveUserProgress] Parse notice on existing progress:', parseErr);
+      }
+    }
+
+    localStorage.setItem(cleanKey, JSON.stringify(toSave));
   } catch (err) {
     console.error('Failed to save progress', err);
   }
@@ -438,20 +507,47 @@ export async function registerStaffOrganizer(): Promise<{ success: boolean; erro
 }
 
 /**
+ * Cache or update a user record in the local user store for fast offline/local retrieval.
+ */
+export function cacheUserLocally(user: PrototypeUser): void {
+  try {
+    const users = getAllUsers();
+    const cleanCall = user.callSign.trim().replace(/^@+/, '').toLowerCase();
+    const cleanEmail = user.email?.trim().toLowerCase();
+    const idx = users.findIndex(
+      (u) =>
+        u.id === user.id ||
+        u.callSign.trim().replace(/^@+/, '').toLowerCase() === cleanCall ||
+        (cleanEmail && u.email && u.email.trim().toLowerCase() === cleanEmail)
+    );
+    if (idx >= 0) {
+      users[idx] = { ...users[idx], ...user };
+    } else {
+      users.push(user);
+    }
+    saveUsers(users);
+  } catch (err) {
+    console.warn('Failed to cache user locally in prototypeAuth', err);
+  }
+}
+
+/**
  * Authenticate prototype user
  */
 export async function loginPrototypeUser(
   callSignOrEmail: string,
   passwordPlain: string
 ): Promise<{ success: boolean; error?: string; user?: PrototypeUser }> {
-  const clean = callSignOrEmail.trim().toLowerCase();
+  const clean = callSignOrEmail.trim().replace(/^@+/, '').toLowerCase();
   if (!clean || !passwordPlain) {
     return { success: false, error: 'Please enter both your call-sign/email and password.' };
   }
 
   const users = getAllUsers();
   const user = users.find(
-    (u) => u.callSign.toLowerCase() === clean || (u.email && u.email.toLowerCase() === clean)
+    (u) =>
+      u.callSign.trim().replace(/^@+/, '').toLowerCase() === clean ||
+      (u.email && u.email.trim().toLowerCase() === clean)
   );
   if (!user) {
     return { success: false, error: 'No investigator record found with this call-sign or email.' };

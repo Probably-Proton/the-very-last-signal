@@ -70,6 +70,12 @@ export const ControlledSystemGlitch: React.FC<ControlledSystemGlitchProps> = ({
   const timersRef = useRef<NodeJS.Timeout[]>([]);
   const hasFinishedRef = useRef(false);
 
+  // Stabilize callbacks in refs to prevent parent re-renders from restarting the glitch animation
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
   const clearAllTimers = useCallback(() => {
     timersRef.current.forEach((t) => clearTimeout(t));
     timersRef.current = [];
@@ -84,9 +90,9 @@ export const ControlledSystemGlitch: React.FC<ControlledSystemGlitchProps> = ({
     setStep('resolved');
     setTimeout(() => {
       setStep('idle');
-      onComplete();
+      onCompleteRef.current();
     }, 250);
-  }, [clearAllTimers, onComplete]);
+  }, [clearAllTimers]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -194,7 +200,7 @@ export const ControlledSystemGlitch: React.FC<ControlledSystemGlitchProps> = ({
                   setStep('resolved');
                   setTimeout(() => {
                     setStep('idle');
-                    onComplete();
+                    onCompleteRef.current();
                   }, 200);
                 }, 2800);
                 timersRef.current.push(t6);
@@ -214,7 +220,7 @@ export const ControlledSystemGlitch: React.FC<ControlledSystemGlitchProps> = ({
     return () => {
       clearAllTimers();
     };
-  }, [isActive, reducedScareMode, clearAllTimers, handleBypass, onComplete]);
+  }, [isActive, reducedScareMode, clearAllTimers, handleBypass]);
 
   // ESC key bypass
   useEffect(() => {

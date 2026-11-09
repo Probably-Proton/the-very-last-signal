@@ -44,6 +44,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { tacticalAudio } from '@/src/lib/tacticalAudio';
+import { signalAudio } from '@/src/lib/signalAudio';
 import {
   STAGE_SCHEDULE,
   calculateStageScore,
@@ -69,8 +70,21 @@ export function DebriefView({
   // Current multi-step stage 7 state
   const currentStep = progress.stage7Step || (progress.stagesCompleted >= 7 ? 'completed' : 'available');
   const [activeTab, setActiveTab] = useState<'chronicle' | 'ending_video' | 'certificate'>(
-    currentStep === 'completed' ? 'certificate' : currentStep === 'article_read' ? 'ending_video' : 'chronicle'
+    currentStep === 'completed'
+      ? 'certificate'
+      : currentStep === 'article_read' || currentStep === 'ending_video_played'
+      ? 'ending_video'
+      : 'chronicle'
   );
+
+  // Guarantee all other audio transmissions (Stage 5 / Signal Room) are silenced when entering the Debrief
+  React.useEffect(() => {
+    signalAudio.cleanup();
+    tacticalAudio.setLocationProfile('ending');
+    return () => {
+      // restore when exiting
+    };
+  }, []);
 
   const videoContainerRef = React.useRef<HTMLDivElement | null>(null);
   const videoElemRef = React.useRef<HTMLVideoElement | null>(null);
@@ -189,6 +203,12 @@ export function DebriefView({
     setIsFullscreen(false);
     setIsNearFullscreen(false);
     setIsTrueFullscreenOverlay(false);
+    if (onUpdateProgress) {
+      onUpdateProgress((prev) => ({
+        ...prev,
+        stage7Step: prev.stage7Step === 'completed' ? 'completed' : 'ending_video_played',
+      }));
+    }
     // Trigger the glitch sequence
     setIsGlitching(true);
   };
@@ -201,6 +221,12 @@ export function DebriefView({
     setIsFullscreen(false);
     setIsNearFullscreen(false);
     setIsTrueFullscreenOverlay(false);
+    if (onUpdateProgress) {
+      onUpdateProgress((prev) => ({
+        ...prev,
+        stage7Step: prev.stage7Step === 'completed' ? 'completed' : 'ending_video_played',
+      }));
+    }
     setIsGlitching(true);
   };
 
@@ -224,10 +250,13 @@ export function DebriefView({
 
     if (onUpdateProgress) {
       onUpdateProgress((prev) => {
+        if (prev.stagesCompleted >= 7 && prev.stage7Step === 'completed') {
+          return prev;
+        }
         const nextCompleted = 7;
         const nextScores = {
           ...prev.stageScores,
-          7: scoreBreakdown.totalScore,
+          7: prev.stageScores?.[7] ?? scoreBreakdown.totalScore,
         };
         const totalScore = Object.values(nextScores).reduce((a, b) => a + b, 0);
 
@@ -239,19 +268,44 @@ export function DebriefView({
           stageScores: nextScores,
           stageSolveTimestamps: {
             ...prev.stageSolveTimestamps,
-            7: nowIso,
+            7: prev.stageSolveTimestamps?.[7] ?? nowIso,
           },
           stageScoringEligible: {
             ...prev.stageScoringEligible,
-            7: scoreBreakdown.scoringEligible,
+            7: prev.stageScoringEligible?.[7] ?? scoreBreakdown.scoringEligible,
           },
           score: totalScore,
-          tasksCompleted: prev.tasksCompleted + 1,
+          tasksCompleted: Math.max(prev.tasksCompleted, 7),
           endingCorruptedAftermath: true,
           aftermathDismissed: false,
         };
       });
     }
+
+    // Immediately synchronize the completed standing to server leaderboard
+    fetch('/api/leaderboard/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callSign: user.callSign,
+        fullName: user.fullName,
+        studentClass: user.studentClass || 'Class 9',
+        score: totalCalculatedScore,
+        stagesCompleted: 7,
+        lastProgress: nowIso,
+        excludeFromLeaderboard: Boolean(
+          user.excludeFromLeaderboard ||
+          progress.excludeFromLeaderboard ||
+          user.hasStageOverride ||
+          progress.hasStageOverride ||
+          user.isStaff
+        ),
+        hasStageOverride: Boolean(user.hasStageOverride || progress.hasStageOverride),
+        teamName: progress.teamName || null,
+        isStaff: Boolean(user.isStaff),
+      }),
+    }).catch(() => {});
+
     setActiveTab('certificate');
   };
 
@@ -528,10 +582,10 @@ export function DebriefView({
                   setVideoLoadError(true);
                   setIsBuffering(false);
                 }}
-                className="w-full h-full object-contain bg-black"
+                className="w-full h-full object-contain bg-black block"
               >
-                <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
                 <source src="/assets/aistudio/WhatsApp_Video_2026-10-29_at_00.25.05_829df3d2.mp4" type="video/mp4" />
+                <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
                 Your browser does not support HTML5 video playback.
               </video>
 
@@ -837,10 +891,10 @@ export function DebriefView({
             playsInline
             controls
             onEnded={handleVideoEnded}
-            className="w-full h-full object-contain bg-black"
+            className="w-full h-full object-contain bg-black block"
           >
-            <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
             <source src="/assets/aistudio/WhatsApp_Video_2026-10-29_at_00.25.05_829df3d2.mp4" type="video/mp4" />
+            <source src="/assets/FINAL_REVIEW.mp4" type="video/mp4" />
           </video>
           <button
             type="button"

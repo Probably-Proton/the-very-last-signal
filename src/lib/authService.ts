@@ -22,6 +22,8 @@ import {
   clearActiveSession as clearLocalActiveSession,
   setActiveSession as setLocalActiveSession,
   isCallSignTaken as isLocalCallSignTaken,
+  cacheUserLocally,
+  getAllUsers,
   hashString,
   maskAdmissionNumber,
   type PrototypeUser,
@@ -239,12 +241,13 @@ export async function registerUser(params: RegisterParams): Promise<AuthResult> 
           cleanEmail === 'rudrapratapj.0562@gmail.com' ||
           cleanEmail === 'rudrapratapf.0562@gmail.com';
 
-        // Defensively ensure public.profiles record exists if DB trigger execution had an issue
+        // Defensively ensure public.profiles record exists with email if supported
         try {
           await supabase.from('profiles').upsert(
             {
               id: data.user.id,
               username: cleanCallSign,
+              email: cleanEmail,
               full_name: fullName.trim(),
               student_class: studentClass,
               admission_hash: admissionHash,
@@ -253,8 +256,23 @@ export async function registerUser(params: RegisterParams): Promise<AuthResult> 
             },
             { onConflict: 'id' }
           );
-        } catch (profileErr) {
-          console.warn('[authService] Defensive profile check notice:', profileErr);
+        } catch {
+          try {
+            await supabase.from('profiles').upsert(
+              {
+                id: data.user.id,
+                username: cleanCallSign,
+                full_name: fullName.trim(),
+                student_class: studentClass,
+                admission_hash: admissionHash,
+                admission_masked: maskedAdmission,
+                exclude_from_leaderboard: isDevOrExcluded,
+              },
+              { onConflict: 'id' }
+            );
+          } catch (profileErr) {
+            console.warn('[authService] Defensive profile check notice:', profileErr);
+          }
         }
 
         const userObj: PrototypeUser = {
@@ -271,7 +289,8 @@ export async function registerUser(params: RegisterParams): Promise<AuthResult> 
           registeredAt: data.user.created_at || new Date().toISOString(),
         };
 
-        // Cache locally for fast UI hydration
+        // Cache locally for fast UI hydration and instant username login
+        cacheUserLocally(userObj);
         setLocalActiveSession(userObj);
         const initProg = createInitialProgress(cleanCallSign);
         if (isDevOrExcluded) {
@@ -366,38 +385,101 @@ export async function loginUser(
         }
         authUser = data.user;
       } else {
-        // Check if there is a cached callsign -> email mapping on this device
-        let cachedEmail: string | null = null;
+        // Multi-tier username-to-email resolution in client
+        let candidateEmail: string | null = null;
+
+        // Tier 1: Check device local mapping
         try {
-          cachedEmail = localStorage.getItem('tls_callsign_email_' + normalizedInput.toLowerCase());
+          candidateEmail = localStorage.getItem('tls_callsign_email_' + normalizedInput.toLowerCase());
         } catch {}
 
-        if (cachedEmail) {
-          const { data: cachedAuthData, error: cachedAuthError } = await supabase.auth.signInWithPassword({
-            email: cachedEmail.toLowerCase(),
+        // Tier 2: Scan prototype user store
+        if (!candidateEmail) {
+          try {
+            const allProto = getAllUsers();
+            const protoMatch = allProto.find(
+              (u) => u.callSign.trim().replace(/^@+/, '').toLowerCase() === normalizedInput.toLowerCase()
+            );
+            if (protoMatch?.email && protoMatch.email.includes('@')) {
+              candidateEmail = protoMatch.email.toLowerCase().trim();
+            }
+          } catch {}
+        }
+
+        // Tier 3: Query Supabase RPC lookup function if deployed
+        if (!candidateEmail) {
+          try {
+            const { data: rpcEmail, error: rpcErr } = await supabase.rpc('lookup_auth_email_by_username', {
+              p_username: normalizedInput,
+            });
+            if (!rpcErr && rpcEmail && typeof rpcEmail === 'string' && rpcEmail.includes('@')) {
+              candidateEmail = rpcEmail.toLowerCase().trim();
+            }
+          } catch {}
+        }
+
+        // Tier 4: Query public.profiles directly by username
+        if (!candidateEmail) {
+          try {
+            const { data: profRow } = await supabase
+              .from('profiles')
+              .select('email')
+              .ilike('username', normalizedInput)
+              .maybeSingle();
+            if (profRow?.email && typeof profRow.email === 'string' && profRow.email.includes('@')) {
+              candidateEmail = profRow.email.toLowerCase().trim();
+            }
+          } catch {}
+        }
+
+        // If candidateEmail was identified, attempt direct Supabase authentication
+        if (candidateEmail) {
+          const { data: directAuth, error: directErr } = await supabase.auth.signInWithPassword({
+            email: candidateEmail,
             password: passwordPlain,
           });
-          if (!cachedAuthError && cachedAuthData?.user) {
-            authUser = cachedAuthData.user;
+          if (!directErr && directAuth?.user) {
+            authUser = directAuth.user;
+            try {
+              localStorage.setItem('tls_callsign_email_' + normalizedInput.toLowerCase(), candidateEmail);
+            } catch {}
           }
         }
 
+        // Tier 5: Try internal legacy auth email format (@case17.internal)
         if (!authUser) {
-          // Username-based login via secure server proxy that resolves username to auth identity
+          const internalEmail = callSignToInternalEmail(normalizedInput);
+          try {
+            const { data: internalAuth, error: internalErr } = await supabase.auth.signInWithPassword({
+              email: internalEmail,
+              password: passwordPlain,
+            });
+            if (!internalErr && internalAuth?.user) {
+              authUser = internalAuth.user;
+            }
+          } catch {}
+        }
+
+        // Tier 6: Use secure server proxy with client credentials passed for resilience
+        if (!authUser) {
           let json: any = null;
           try {
+            const clientUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || undefined;
+            const clientAnon = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || undefined;
+
             const res = await fetch('/api/auth/username-login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 username: normalizedInput,
                 password: passwordPlain,
+                supabaseUrl: clientUrl,
+                supabaseAnonKey: clientAnon,
               }),
             });
             json = await res.json().catch(() => null);
 
             if (res.ok && json?.success && json?.session) {
-              // Establish the real Supabase Auth session in the browser client
               const { error: sessionError } = await supabase.auth.setSession({
                 access_token: json.session.access_token,
                 refresh_token: json.session.refresh_token,
@@ -425,7 +507,7 @@ export async function loginUser(
 
             return {
               success: false,
-              error: json?.error || 'Invalid case credentials. Please check your call-sign and password.',
+              error: json?.error || 'Invalid case credentials. Please check your username/call-sign and password.',
               mode: 'live_supabase',
             };
           }
@@ -466,15 +548,27 @@ export async function loginUser(
         cleanInput;
 
       // Remember call-sign -> email association for future logins on this machine
-      if (data.user.email) {
+      const userEmail = (data.user.email || '').toLowerCase().trim();
+      if (userEmail) {
         try {
-          localStorage.setItem('tls_callsign_email_' + resolvedCallSign.toLowerCase(), data.user.email);
+          localStorage.setItem('tls_callsign_email_' + resolvedCallSign.toLowerCase(), userEmail);
+          localStorage.setItem('tls_callsign_email_' + normalizedInput.toLowerCase(), userEmail);
+          if (data.user.user_metadata?.username) {
+            localStorage.setItem('tls_callsign_email_' + String(data.user.user_metadata.username).toLowerCase(), userEmail);
+          }
+          if (data.user.user_metadata?.callSign) {
+            localStorage.setItem('tls_callsign_email_' + String(data.user.user_metadata.callSign).toLowerCase(), userEmail);
+          }
         } catch {}
+
+        // Defensively update profiles.email in Supabase if supported and missing
+        if (profile && (!profile.email || !profile.email.includes('@'))) {
+          Promise.resolve(supabase.from('profiles').update({ email: userEmail }).eq('id', data.user.id)).catch(() => {});
+        }
       }
 
       // Verify individual stage-access override from Supabase participant_stage_overrides table
       const hasStageOverride = await verifyParticipantStageOverride();
-      const userEmail = (data.user.email || '').toLowerCase().trim();
       const isDeveloperAccount = userEmail === 'rudrapratapf.0562@gmail.com';
       const excludeFromLeaderboard =
         Boolean(isStaff) ||
@@ -501,6 +595,8 @@ export async function loginUser(
         excludeFromLeaderboard,
       };
 
+      // Cache locally for instant username recognition and offline support
+      cacheUserLocally(userObj);
       setLocalActiveSession(userObj);
 
       // Synchronize verified override, team membership, and completions from Supabase
@@ -625,76 +721,248 @@ export async function verifyParticipantLeaderboardExclusion(userId?: string): Pr
 
 /**
  * Synchronize authoritative completions and team membership from Supabase into local progress.
+ * Non-destructive:
+ * 1. Resolves ALL participant records for this user (active team, retired team, active solo, retired solo).
+ * 2. Bridges via application server (/api/progress/state) if client queries face RLS lockouts.
+ * 3. Never treats query errors or empty responses as proof that an existing player has no progress.
+ * 4. Reconciles scores stage-by-stage against authoritative completions to prevent duplicate awards.
  */
-async function syncUserDatabaseState(userId: string, _callSign: string, nextProg: UserProgress): Promise<UserProgress> {
-  if (!isSupabaseConfigured || !supabase) return nextProg;
-  try {
-    // 1. Fetch active participant and team membership
-    const { data: memberRows } = await supabase
-      .from('participant_members')
-      .select('participant_id, participants(id, kind, name, invite_code, retired)')
-      .eq('user_id', userId)
-      .is('left_at', null)
-      .limit(1);
+async function syncUserDatabaseState(userId: string, callSign: string, nextProg: UserProgress): Promise<UserProgress> {
+  const cleanCall = callSign.trim();
+  const allParticipantIds = new Set<string>();
+  let activeTeamName: string | null = null;
+  let activeTeamCode: string | null = null;
+  let hadQueryError = false;
 
-    const activeMember = memberRows?.[0];
-    const participant = activeMember?.participants as any;
-    const participantId = activeMember?.participant_id;
+  // 1. Client-side Supabase resolution (if configured)
+  if (isSupabaseConfigured && supabase) {
+    // 1a. Query participant_members (team memberships)
+    try {
+      const { data: memberRows, error: memberErr } = await supabase
+        .from('participant_members')
+        .select('participant_id, left_at, participants(id, kind, name, invite_code, retired)')
+        .eq('user_id', userId);
 
-    if (participant && !participant.retired && participant.kind === 'team') {
-      if (participant.name && nextProg.teamName !== participant.name) {
-        nextProg.teamName = participant.name;
+      if (memberErr) {
+        console.warn('[authService] participant_members lookup notice (RLS may apply):', memberErr.message);
+        hadQueryError = true;
+      } else if (Array.isArray(memberRows)) {
+        for (const m of memberRows) {
+          if (m.participant_id) {
+            allParticipantIds.add(m.participant_id);
+            const p = m.participants as any;
+            if (!m.left_at && p && !p.retired && p.kind === 'team') {
+              activeTeamName = p.name || activeTeamName;
+              activeTeamCode = p.invite_code || activeTeamCode;
+            }
+          }
+        }
       }
-      if (participant.invite_code && nextProg.teamCode !== participant.invite_code) {
-        nextProg.teamCode = participant.invite_code;
-      }
+    } catch (err) {
+      console.warn('[authService] Exception checking participant_members:', err);
+      hadQueryError = true;
     }
 
-    // 2. Fetch authoritative completions from stage_completions
-    if (participantId) {
-      const { data: completions } = await supabase
-        .from('stage_completions')
-        .select('stage_id, points_earned')
-        .eq('participant_id', participantId);
+    // 1b. Query participants table directly for solo participant IDs (active and retired)
+    try {
+      const { data: soloRows, error: soloErr } = await supabase
+        .from('participants')
+        .select('id, kind, name, invite_code, retired')
+        .eq('solo_user_id', userId);
 
-      if (Array.isArray(completions) && completions.length > 0) {
-        let maxStage = 0;
-        let totalDbScore = 0;
-        const stageScoresMap: Record<number, number> = { ...nextProg.stageScores };
-
-        for (const c of completions) {
-          const sId = Number(c.stage_id);
-          const pts = Number(c.points_earned) || 100;
-          if (sId > maxStage) maxStage = sId;
-          totalDbScore += pts;
-          stageScoresMap[sId] = Math.max(stageScoresMap[sId] || 0, pts);
-        }
-
-        if (maxStage > nextProg.stagesCompleted) {
-          nextProg.stagesCompleted = maxStage;
-          nextProg.activeStage = Math.max(nextProg.activeStage, Math.min(7, maxStage + 1));
-        }
-        if (maxStage >= 2) {
-          nextProg.stage2DeductionSolved = true;
-          if (!nextProg.unlockedEvidenceIds.includes('CAS-017')) {
-            nextProg.unlockedEvidenceIds.push('CAS-017');
-          }
-          if (!nextProg.unlockedEvidenceIds.includes('EV-0301')) {
-            nextProg.unlockedEvidenceIds.push('EV-0301');
-          }
-          if (!nextProg.solvedChallengeKeys.includes('stage2_coords')) {
-            nextProg.solvedChallengeKeys.push('stage2_coords');
+      if (soloErr) {
+        console.warn('[authService] participants solo lookup notice:', soloErr.message);
+      } else if (Array.isArray(soloRows)) {
+        for (const s of soloRows) {
+          if (s.id) {
+            allParticipantIds.add(s.id);
           }
         }
-        if (totalDbScore > nextProg.score) {
-          nextProg.score = totalDbScore;
-        }
-        nextProg.stageScores = stageScoresMap;
       }
+    } catch (err) {
+      console.warn('[authService] Exception checking solo participants:', err);
     }
-  } catch (err) {
-    console.warn('[authService] Error syncing database progress/team state:', err);
+
+    // 1c. Try my_participant() RPC if available
+    try {
+      const { data: rpcPid, error: rpcErr } = await supabase.rpc('my_participant');
+      if (!rpcErr && rpcPid && typeof rpcPid === 'string') {
+        allParticipantIds.add(rpcPid);
+      }
+    } catch {}
   }
+
+  // 2. Authoritative Application Server Bridge (/api/progress/state)
+  // Bypasses browser RLS policies using verified Bearer session token (no client-supplied IDs trusted)
+  let serverCompletions: any[] = [];
+  try {
+    let accessToken: string | null = null;
+    if (isSupabaseConfigured && supabase) {
+      const { data: sessData } = await supabase.auth.getSession();
+      accessToken = sessData?.session?.access_token || null;
+    }
+
+    if (accessToken) {
+      const res = await fetch('/api/progress/state', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          if (Array.isArray(json.data.participantIds)) {
+            json.data.participantIds.forEach((pid: string) => pid && allParticipantIds.add(pid));
+          }
+          if (json.data.teamName && !activeTeamName) {
+            activeTeamName = json.data.teamName;
+            activeTeamCode = json.data.teamCode;
+          }
+          if (Array.isArray(json.data.completions)) {
+            serverCompletions = json.data.completions;
+          }
+        }
+      } else {
+        console.warn(`[authService] /api/progress/state returned HTTP ${res.status}`);
+        hadQueryError = true;
+      }
+    }
+  } catch (netErr) {
+    console.warn('[authService] Server progress state fallback notice:', netErr);
+    hadQueryError = true;
+  }
+
+  // Update active team information if confirmed
+  if (activeTeamName && nextProg.teamName !== activeTeamName) {
+    nextProg.teamName = activeTeamName;
+  }
+  if (activeTeamCode && nextProg.teamCode !== activeTeamCode) {
+    nextProg.teamCode = activeTeamCode;
+  }
+
+  // 3. Query authoritative completions from stage_completions
+  const pids = Array.from(allParticipantIds);
+  let dbCompletions: any[] = [...serverCompletions];
+
+  if (isSupabaseConfigured && supabase && pids.length > 0) {
+    try {
+      const { data: completions, error: compErr } = await supabase
+        .from('stage_completions')
+        .select('stage_id, points_earned, completed_at, participant_id')
+        .in('participant_id', pids);
+
+      if (compErr) {
+        console.warn('[authService] stage_completions query error (RLS may apply):', compErr.message);
+        hadQueryError = true;
+      } else if (Array.isArray(completions) && completions.length > 0) {
+        for (const c of completions) {
+          const already = dbCompletions.some(
+            (existing) => Number(existing.stage_id) === Number(c.stage_id) && existing.participant_id === c.participant_id
+          );
+          if (!already) {
+            dbCompletions.push(c);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[authService] Error querying stage_completions:', err);
+      hadQueryError = true;
+    }
+  }
+
+  // 4. Safe non-destructive reconciliation
+  // A query failure or empty response must never downgrade an existing investigator's progress!
+  if (dbCompletions.length > 0) {
+    // Reconcile stage scores per stage without duplicate awards
+    const stageScoresMap: Record<number, number> = { ...(nextProg.stageScores || {}) };
+    const stageTimestamps: Record<number, string> = { ...(nextProg.stageSolveTimestamps || {}) };
+
+    for (const c of dbCompletions) {
+      const sId = Number(c.stage_id);
+      const pts = Number(c.points_earned) || 100;
+      // For each unique stage, take the highest awarded score (avoid duplicate addition)
+      stageScoresMap[sId] = Math.max(stageScoresMap[sId] || 0, pts);
+      if (c.completed_at && !stageTimestamps[sId]) {
+        stageTimestamps[sId] = c.completed_at;
+      }
+    }
+
+    const completedStageIds = Object.keys(stageScoresMap).map(Number);
+    const maxCompletedStage = Math.max(nextProg.stagesCompleted || 0, ...completedStageIds);
+    // Score is the sum of unique stage scores
+    const totalAuthoritativeScore = Object.values(stageScoresMap).reduce((sum, pts) => sum + (Number(pts) || 0), 0);
+
+    nextProg.stagesCompleted = maxCompletedStage;
+    nextProg.activeStage = Math.max(nextProg.activeStage || 1, Math.min(7, maxCompletedStage + 1));
+    nextProg.score = Math.max(nextProg.score || 0, totalAuthoritativeScore);
+    nextProg.stageScores = stageScoresMap;
+    nextProg.stageSolveTimestamps = stageTimestamps;
+
+    // Unpack canonical unlocks based on completed stages
+    if (maxCompletedStage >= 1) {
+      const stage1Evidence = ['EV-0102', 'EV-0103', 'EV-0201', 'EV-0202', 'EV-0203', 'EV-0204'];
+      for (const ev of stage1Evidence) {
+        if (!nextProg.unlockedEvidenceIds.includes(ev)) nextProg.unlockedEvidenceIds.push(ev);
+      }
+      if (!nextProg.solvedChallengeKeys.includes('gate_zk_login')) {
+        nextProg.solvedChallengeKeys.push('gate_zk_login');
+      }
+    }
+
+    if (maxCompletedStage >= 2) {
+      nextProg.stage2DeductionSolved = true;
+      if (!nextProg.unlockedEvidenceIds.includes('CAS-017')) nextProg.unlockedEvidenceIds.push('CAS-017');
+      if (!nextProg.unlockedEvidenceIds.includes('EV-0301')) nextProg.unlockedEvidenceIds.push('EV-0301');
+      if (!nextProg.solvedChallengeKeys.includes('stage2_coords')) {
+        nextProg.solvedChallengeKeys.push('stage2_coords');
+      }
+    }
+
+    if (maxCompletedStage >= 3) {
+      nextProg.mapGateUnlocked = true;
+      if (!nextProg.unlockedEvidenceIds.includes('MAP-001')) nextProg.unlockedEvidenceIds.push('MAP-001');
+      if (!nextProg.unlockedEvidenceIds.includes('EV-0302')) nextProg.unlockedEvidenceIds.push('EV-0302');
+      if (!nextProg.solvedChallengeKeys.includes('gate_map')) {
+        nextProg.solvedChallengeKeys.push('gate_map');
+      }
+    }
+
+    if (maxCompletedStage >= 4) {
+      nextProg.targetChoiceLocked = true;
+    }
+
+    if (maxCompletedStage >= 5) {
+      nextProg.suspectDbUnlocked = true;
+      const s5Evidence = ['SUSP-001', 'SUSP-002', 'SUSP-003', 'SUSP-004'];
+      for (const ev of s5Evidence) {
+        if (!nextProg.unlockedEvidenceIds.includes(ev)) nextProg.unlockedEvidenceIds.push(ev);
+      }
+      if (!nextProg.solvedChallengeKeys.includes('gate_suspect_db')) {
+        nextProg.solvedChallengeKeys.push('gate_suspect_db');
+      }
+    }
+
+    if (maxCompletedStage >= 6) {
+      nextProg.systemFreezeTriggered = true;
+      if (!nextProg.unlockedEvidenceIds.includes('AUD-001')) nextProg.unlockedEvidenceIds.push('AUD-001');
+      if (!nextProg.unlockedEvidenceIds.includes('EV-0601')) nextProg.unlockedEvidenceIds.push('EV-0601');
+      if (!nextProg.solvedChallengeKeys.includes('gate_audio')) {
+        nextProg.solvedChallengeKeys.push('gate_audio');
+      }
+    }
+
+    if (maxCompletedStage >= 7) {
+      nextProg.stage7Step = 'completed';
+      nextProg.status = 'COMPLETED';
+    } else if (maxCompletedStage > 0) {
+      nextProg.status = 'IN PROGRESS';
+    }
+  } else if (hadQueryError) {
+    console.warn(`[authService] Queries encountered errors during progress sync for @${cleanCall}. Preserving existing local state.`);
+  }
+
   return nextProg;
 }
 
@@ -723,9 +991,16 @@ export async function restoreSession(): Promise<PrototypeUser | null> {
 
         const callSign = profile?.username || (data.session.user.user_metadata?.username as string) || 'Operative';
 
-        if (data.session.user.email && callSign) {
+        const userEmail = (data.session.user.email || '').toLowerCase().trim();
+        if (userEmail) {
           try {
-            localStorage.setItem('tls_callsign_email_' + callSign.toLowerCase(), data.session.user.email);
+            if (callSign) localStorage.setItem('tls_callsign_email_' + callSign.toLowerCase(), userEmail);
+            if (data.session.user.user_metadata?.username) {
+              localStorage.setItem('tls_callsign_email_' + String(data.session.user.user_metadata.username).toLowerCase(), userEmail);
+            }
+            if (data.session.user.user_metadata?.callSign) {
+              localStorage.setItem('tls_callsign_email_' + String(data.session.user.user_metadata.callSign).toLowerCase(), userEmail);
+            }
           } catch {}
         }
 
@@ -757,6 +1032,7 @@ export async function restoreSession(): Promise<PrototypeUser | null> {
           excludeFromLeaderboard,
         };
 
+        cacheUserLocally(userObj);
         setLocalActiveSession(userObj);
 
         // Synchronize verified override, team membership, and completions from Supabase

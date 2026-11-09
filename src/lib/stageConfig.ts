@@ -169,8 +169,8 @@ export function isStageAccessible(
   // Stage 1 requires 0 completed stages. Stage 2 requires >= 1, Stage 3 requires >= 2, etc.
   const isPrerequisiteCompleted = stageNumber === 1 || stagesCompleted >= stageNumber - 1;
 
-  // Condition 2: Configured release timestamp has been reached
-  const isReleaseTimeReached = referenceTime.getTime() >= new Date(stage.openIso).getTime();
+  // Condition 2: Configured release timestamp has been reached (if gates enabled)
+  const isReleaseTimeReached = !ENABLE_TIMELINE_GATES || referenceTime.getTime() >= new Date(stage.openIso).getTime();
 
   // BOTH conditions must be true
   return isPrerequisiteCompleted && isReleaseTimeReached;
